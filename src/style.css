@@ -4,6 +4,11 @@
     box-sizing: border-box;
 }
 
+html {
+    height: auto;
+    overflow-y: auto;
+}
+
 :root {
     --bg-primary: #0f0f1a;
     --bg-secondary: #1a1a2e;
@@ -1218,14 +1223,43 @@ header p {
 
 /* Responsive */
 @media (max-width: 900px) {
+    html, body {
+        height: auto !important;
+        overflow-y: auto !important;
+        position: static !important;
+        touch-action: pan-y !important;
+    }
+    
+    .app {
+        padding: 12px;
+        padding-bottom: 40px;
+    }
+    
+    .workspace {
+        overflow: visible;
+    }
+    
     .workspace-content {
         grid-template-columns: 1fr;
+        height: auto;
+        min-height: auto;
     }
     
     .preview-panel {
         border-right: none;
         border-bottom: 1px solid var(--border);
-        height: 400px;
+        height: 300px;
+        min-height: 300px;
+    }
+    
+    .parts-panel {
+        max-height: none;
+        height: auto;
+    }
+    
+    .parts-list {
+        max-height: 400px;
+        overflow-y: auto;
     }
     
     .upload-options {
@@ -1239,5 +1273,23 @@ header p {
     .upload-zone,
     .catalog-btn {
         width: 100%;
+    }
+    
+    .workspace-header {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+    }
+    
+    .workspace-actions {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+    
+    .workspace-actions button {
+        flex: 1;
+        min-width: 80px;
+        font-size: 0.85rem;
+        padding: 8px 10px;
     }
 }
