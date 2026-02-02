@@ -826,6 +826,8 @@ function setupWorkspace() {
     
     document.getElementById('centerView').addEventListener('click', centerView);
     document.getElementById('resetView').addEventListener('click', resetCameraView);
+    document.getElementById('topView').addEventListener('click', topViewFitAll);
+    document.getElementById('toggleProjection').addEventListener('click', toggleProjection);
     
     // Instructions modal
     document.getElementById('viewInstructions').addEventListener('click', showInstructionsModal);
@@ -1174,26 +1176,15 @@ async function updatePreview() {
             return;
         }
         
-        // Build list of all instances (part + quantity)
+        // Build list of all instances with their sizes
         const instances = [];
-        for (let i = 0; i < state.parts.length; i++) {
-            const part = state.parts[i];
-            const qty = part.quantity || 1;
-            for (let q = 0; q < qty; q++) {
-                instances.push({ partIndex: i, part });
-            }
-        }
-        
-        const totalInstances = instances.length;
-        let loaded = 0;
-        updateLoadingStatus(`Loading parts: 0/${totalInstances}`);
-        
-        // Cache geometries and find max size
         const geometryCache = new Map();
-        let maxWidth = 0, maxDepth = 0;
-        const padding = 20;
+        const sizeCache = new Map();
+        const padding = 10;
         
-        // First pass: load all unique geometries and find largest
+        updateLoadingStatus(`Loading geometries...`);
+        
+        // Load all unique geometries and measure sizes
         for (const part of state.parts) {
             if (!geometryCache.has(part.id)) {
                 let geometry;
@@ -1210,35 +1201,63 @@ async function updatePreview() {
                 
                 geometryCache.set(part.id, geometry);
                 
-                // Measure bounding box
+                // Measure bounding box and center offset
                 geometry.computeBoundingBox();
                 const box = geometry.boundingBox;
-                const w = box.max.x - box.min.x;
-                const d = box.max.z - box.min.z;
-                maxWidth = Math.max(maxWidth, w);
-                maxDepth = Math.max(maxDepth, d);
-            }
-            
-            loaded++;
-            if (loaded % 5 === 0) {
-                updateLoadingStatus(`Loading geometries: ${loaded}/${state.parts.length}`);
+                sizeCache.set(part.id, {
+                    width: box.max.x - box.min.x,
+                    depth: box.max.z - box.min.z,
+                    centerX: (box.max.x + box.min.x) / 2,
+                    centerZ: (box.max.z + box.min.z) / 2
+                });
             }
         }
         
-        // Uniform cell size based on largest part
-        const cellWidth = maxWidth + padding;
-        const cellDepth = maxDepth + padding;
-        const cols = Math.ceil(Math.sqrt(totalInstances));
+        // Build instances list
+        for (let i = 0; i < state.parts.length; i++) {
+            const part = state.parts[i];
+            const size = sizeCache.get(part.id);
+            const qty = part.quantity || 1;
+            for (let q = 0; q < qty; q++) {
+                instances.push({ partIndex: i, part, size });
+            }
+        }
         
-        // Second pass: place all instances in grid
-        loaded = 0;
+        // Sort by size (largest first) for better packing
+        instances.sort((a, b) => (b.size.width * b.size.depth) - (a.size.width * a.size.depth));
+        
+        // Simple row-based layout with actual sizes
+        const totalInstances = instances.length;
+        const targetRowWidth = Math.sqrt(totalInstances) * 50;
+        
+        let x = 0, z = 0, rowHeight = 0, rowStartX = 0;
+        const positions = [];
+        
         for (let i = 0; i < instances.length; i++) {
-            const { partIndex, part } = instances[i];
-            const row = Math.floor(i / cols);
-            const col = i % cols;
+            const { size } = instances[i];
+            const w = size.width + padding;
+            const d = size.depth + padding;
             
-            const x = (col - cols / 2 + 0.5) * cellWidth;
-            const z = (row - Math.ceil(totalInstances / cols) / 2 + 0.5) * cellDepth;
+            // Start new row if needed
+            if (x > 0 && x + w > targetRowWidth) {
+                z += rowHeight;
+                x = 0;
+                rowHeight = 0;
+            }
+            
+            positions.push({ x: x + size.width / 2, z: z + size.depth / 2 });
+            x += w;
+            rowHeight = Math.max(rowHeight, d);
+        }
+        
+        // Center the layout
+        const totalWidth = Math.max(...positions.map(p => p.x)) + padding;
+        const totalDepth = z + rowHeight;
+        
+        // Place meshes
+        for (let i = 0; i < instances.length; i++) {
+            const { partIndex, part, size } = instances[i];
+            const pos = positions[i];
             
             const geometry = geometryCache.get(part.id);
             const isSelected = state.selectedParts.has(partIndex);
@@ -1252,18 +1271,22 @@ async function updatePreview() {
             });
             
             const mesh = new THREE.Mesh(geometry.clone(), material);
-            mesh.position.set(x, 0, z);
+            // Center the mesh and offset by geometry center
+            mesh.position.set(
+                pos.x - totalWidth / 2 - size.centerX,
+                0,
+                pos.z - totalDepth / 2 - size.centerZ
+            );
             mesh.userData = { partIndex };
             state.partsGroup.add(mesh);
             
-            loaded++;
-            if (loaded % 20 === 0 || loaded === totalInstances) {
-                updateLoadingStatus(`Placing parts: ${loaded}/${totalInstances}`);
+            if ((i + 1) % 20 === 0 || i === instances.length - 1) {
+                updateLoadingStatus(`Placing parts: ${i + 1}/${totalInstances}`);
             }
         }
         
         updateLoadingStatus('');
-        console.log(`Preview loaded: ${totalInstances} instances, cell size: ${cellWidth.toFixed(0)}x${cellDepth.toFixed(0)}`);
+        console.log(`Preview loaded: ${totalInstances} instances`);
         centerOnGroup(state.partsGroup);
     }
 }
@@ -1379,6 +1402,78 @@ function centerView() {
     );
     state.controls.target.copy(center);
     state.controls.update();
+}
+
+function topViewFitAll() {
+    if (!state.scene) return;
+    
+    const targetGroup = state.viewMode === 'built' && state.builtGroup 
+        ? state.builtGroup 
+        : state.partsGroup;
+    
+    if (!targetGroup) return;
+    
+    // Calculate bounding box
+    const box = new THREE.Box3().setFromObject(targetGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    
+    // Position camera directly above, looking down
+    const maxHorizontal = Math.max(size.x, size.z);
+    const distance = maxHorizontal * 1.2;
+    
+    state.camera.position.set(center.x, center.y + distance, center.z);
+    state.controls.target.copy(center);
+    state.camera.lookAt(center);
+    state.controls.update();
+}
+
+function toggleProjection() {
+    if (!state.camera || !state.renderer) return;
+    
+    const container = document.getElementById('preview3d');
+    const aspect = container.clientWidth / container.clientHeight;
+    
+    if (state.camera.isPerspectiveCamera) {
+        // Switch to orthographic
+        const targetGroup = state.partsGroup || state.builtGroup;
+        let viewSize = 500;
+        
+        if (targetGroup) {
+            const box = new THREE.Box3().setFromObject(targetGroup);
+            const size = box.getSize(new THREE.Vector3());
+            viewSize = Math.max(size.x, size.y, size.z) * 1.5;
+        }
+        
+        const newCamera = new THREE.OrthographicCamera(
+            -viewSize * aspect / 2, viewSize * aspect / 2,
+            viewSize / 2, -viewSize / 2,
+            0.1, 20000
+        );
+        newCamera.position.copy(state.camera.position);
+        newCamera.quaternion.copy(state.camera.quaternion);
+        
+        state.camera = newCamera;
+        state.controls.object = newCamera;
+        state.controls.update();
+        
+        document.getElementById('toggleProjection').textContent = '🎥';
+        document.getElementById('toggleProjection').title = 'Switch to Perspective';
+    } else {
+        // Switch to perspective
+        const newCamera = new THREE.PerspectiveCamera(
+            50, aspect, 0.1, 20000
+        );
+        newCamera.position.copy(state.camera.position);
+        newCamera.quaternion.copy(state.camera.quaternion);
+        
+        state.camera = newCamera;
+        state.controls.object = newCamera;
+        state.controls.update();
+        
+        document.getElementById('toggleProjection').textContent = '📐';
+        document.getElementById('toggleProjection').title = 'Switch to Orthographic';
+    }
 }
 
 // Export Modal
