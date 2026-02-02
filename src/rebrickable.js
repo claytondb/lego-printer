@@ -5,9 +5,9 @@
 
 import { FEATURED_SETS, THEMES, SET_PARTS } from './bundled-sets.js';
 
-// Rebrickable API key - users can set their own in localStorage
-// Get a free key at: https://rebrickable.com/api/
-const getApiKey = () => localStorage.getItem('rebrickable_api_key') || '';
+// Rebrickable API key
+const DEFAULT_API_KEY = '63fc594deb555ac97f1b84596befd2b1';
+const getApiKey = () => localStorage.getItem('rebrickable_api_key') || DEFAULT_API_KEY;
 const BASE_URL = 'https://rebrickable.com/api/v3';
 
 // Check if API is available
