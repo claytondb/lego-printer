@@ -997,6 +997,15 @@ function init3DPreview() {
     const container = document.getElementById('preview3d');
     container.innerHTML = '';
     
+    console.log('Initializing 3D preview, container size:', container.clientWidth, 'x', container.clientHeight);
+    
+    // Ensure container has dimensions
+    if (container.clientWidth === 0 || container.clientHeight === 0) {
+        console.warn('Preview container has no size, waiting...');
+        setTimeout(() => init3DPreview(), 100);
+        return;
+    }
+    
     state.scene = new THREE.Scene();
     state.scene.background = new THREE.Color(0x1a1a2e);
     
@@ -1028,6 +1037,15 @@ function init3DPreview() {
     // Grid
     const gridHelper = new THREE.GridHelper(500, 50, 0x444444, 0x333333);
     state.scene.add(gridHelper);
+    
+    // Add a test cube to verify rendering works
+    const testGeo = new THREE.BoxGeometry(30, 30, 30);
+    const testMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+    const testCube = new THREE.Mesh(testGeo, testMat);
+    testCube.position.set(0, 15, 0);
+    testCube.name = 'testCube';
+    state.scene.add(testCube);
+    console.log('Added test cube to scene');
     
     updatePreview();
     
@@ -1072,57 +1090,117 @@ async function updatePreview() {
     } else {
         // Show parts laid out (fallback or parts view)
         state.partsGroup = new THREE.Group();
-        
-        const cols = Math.ceil(Math.sqrt(state.parts.length));
-        const spacing = 50;
-        
-        // Load all part geometries in parallel
-        const geometryPromises = state.parts.map(part => getPartGeometry(part.id));
-        const geometries = await Promise.all(geometryPromises);
-        
-        state.parts.forEach((part, index) => {
-            const isSelected = state.selectedParts.has(index);
-            const color = LDRAW_COLORS[part.color] || { hex: '#888888' };
-            
-            const geometry = geometries[index];
-            const material = new THREE.MeshPhongMaterial({ 
-                color: color.hex,
-                opacity: isSelected ? 1 : 0.3,
-                transparent: !isSelected,
-                flatShading: false
-            });
-            
-            const mesh = new THREE.Mesh(geometry, material);
-            const row = Math.floor(index / cols);
-            const col = index % cols;
-            mesh.position.set(col * spacing - (cols * spacing / 2), 0, row * spacing - (cols * spacing / 2));
-            
-            state.partsGroup.add(mesh);
-        });
-        
         state.scene.add(state.partsGroup);
         
-        // Auto-center on parts
-        if (state.partsGroup.children.length > 0) {
-            const box = new THREE.Box3().setFromObject(state.partsGroup);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const distance = maxDim * 1.2;
-            
-            state.controls.target.copy(center);
-            state.camera.position.set(
-                center.x + distance,
-                center.y + distance * 0.5,
-                center.z + distance
-            );
-            state.controls.update();
+        if (state.parts.length === 0) {
+            console.log('No parts to display');
+            return;
         }
         
-        // Show cache stats
-        const stats = getCacheStats();
-        console.log(`Preview loaded: ${state.parts.length} parts (${stats.cached} cached)`);
+        const cols = Math.ceil(Math.sqrt(state.parts.length));
+        const spacing = 60;
+        
+        // Create placeholder boxes immediately
+        const placeholders = [];
+        const placeholderMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x444444,
+            opacity: 0.3,
+            transparent: true
+        });
+        const placeholderGeometry = new THREE.BoxGeometry(40, 24, 40);
+        
+        state.parts.forEach((part, index) => {
+            const row = Math.floor(index / cols);
+            const col = index % cols;
+            const x = col * spacing - (cols * spacing / 2);
+            const z = row * spacing - (Math.ceil(state.parts.length / cols) * spacing / 2);
+            
+            const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
+            placeholder.position.set(x, 12, z);
+            state.partsGroup.add(placeholder);
+            placeholders.push({ mesh: placeholder, x, z, index });
+        });
+        
+        // Center camera on placeholders
+        centerOnGroup(state.partsGroup);
+        
+        // Show loading status
+        const statusEl = document.getElementById('loadingStatus');
+        if (statusEl) statusEl.style.display = 'block';
+        
+        // Load real geometries progressively
+        let loaded = 0;
+        const total = state.parts.length;
+        
+        for (let i = 0; i < state.parts.length; i++) {
+            const part = state.parts[i];
+            const placeholder = placeholders[i];
+            
+            try {
+                const geometry = await getPartGeometry(part.id);
+                const isSelected = state.selectedParts.has(i);
+                const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
+                
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: colorHex,
+                    opacity: isSelected ? 1 : 0.5,
+                    transparent: !isSelected,
+                    flatShading: false
+                });
+                
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(placeholder.x, 0, placeholder.z);
+                
+                // Remove placeholder and add real mesh
+                state.partsGroup.remove(placeholder.mesh);
+                state.partsGroup.add(mesh);
+                
+                loaded++;
+                updateLoadingStatus(`Loading parts: ${loaded}/${total}`);
+                
+            } catch (error) {
+                console.error(`Failed to load part ${part.id}:`, error);
+                // Keep placeholder for failed parts
+                loaded++;
+            }
+        }
+        
+        updateLoadingStatus('');
+        console.log(`Preview loaded: ${loaded}/${total} parts`);
+        
+        // Final center
+        centerOnGroup(state.partsGroup);
     }
+}
+
+function centerOnGroup(group) {
+    if (!group || group.children.length === 0) return;
+    
+    const box = new THREE.Box3().setFromObject(group);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 100;
+    const distance = maxDim * 1.5;
+    
+    state.controls.target.copy(center);
+    state.camera.position.set(
+        center.x + distance,
+        center.y + distance * 0.5,
+        center.z + distance
+    );
+    state.controls.update();
+}
+
+function updateLoadingStatus(text) {
+    let el = document.getElementById('previewLoadingStatus');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'previewLoadingStatus';
+        el.style.cssText = 'position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.7);color:#fff;padding:8px 12px;border-radius:4px;font-size:12px;z-index:10;';
+        document.getElementById('preview3d').appendChild(el);
+    }
+    el.textContent = text;
+    el.style.display = text ? 'block' : 'none';
 }
 
 function resetCameraView() {

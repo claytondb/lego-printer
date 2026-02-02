@@ -295,6 +295,7 @@ header p {
 .preview-3d {
     flex: 1;
     background: var(--bg-primary);
+    position: relative;
 }
 
 /* Parts Panel */
