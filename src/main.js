@@ -1,28 +1,63 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { LDrawParser } from './ldraw-parser.js';
-import { STLExporter } from './stl-exporter.js';
+import { LDrawLoader } from 'three/examples/jsm/loaders/LDrawLoader.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { LDRAW_COLORS } from './ldraw-colors.js';
+import { SET_CATALOG } from './set-catalog.js';
+
+// LDraw parts library URL (official mirror)
+const LDRAW_PARTS_URL = 'https://raw.githubusercontent.com/nicoschwabe/ldraw-parts/main/';
 
 // App State
 const state = {
-    parts: [],          // Parsed parts from file
+    parts: [],              // Parsed parts with geometry
+    partInstances: [],      // Individual placed parts with transforms
     selectedParts: new Set(),
     scene: null,
     camera: null,
     renderer: null,
     controls: null,
-    partMeshes: new Map()
+    ldrawLoader: null,
+    loadedGeometries: new Map(),  // partId -> geometry
+    builtGroup: null,       // Group for assembled model
+    partsGroup: null,       // Group for laid-out parts
+    viewMode: 'built',      // 'built' or 'parts'
+    currentModelName: '',
+    rawLdrContent: null     // Store raw LDR for parsing
 };
 
 // Initialize
 document.addEventListener('DOMContentLoaded', init);
 
-function init() {
+async function init() {
     setupUpload();
     setupWorkspace();
     setupModal();
+    setupCatalog();
     setupSamples();
+    await initLDrawLoader();
+}
+
+// Sample Designs
+function setupSamples() {
+    document.querySelectorAll('.sample-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const sampleMap = { car: 'simple-car', house: 'mini-house', robot: 'robot' };
+            const setId = sampleMap[btn.dataset.sample];
+            if (setId) loadCatalogSet(setId);
+        });
+    });
+}
+
+// LDraw Loader Setup
+async function initLDrawLoader() {
+    state.ldrawLoader = new LDrawLoader();
+    
+    // Set path to parts library
+    state.ldrawLoader.setPartsLibraryPath(LDRAW_PARTS_URL);
+    
+    // Smoother rendering
+    state.ldrawLoader.smoothNormals = true;
 }
 
 // File Upload
@@ -55,102 +90,342 @@ function setupUpload() {
 }
 
 async function loadFile(file) {
-    const text = await file.text();
-    const parser = new LDrawParser();
+    const ext = file.name.split('.').pop().toLowerCase();
+    
+    showLoading('Loading model...');
     
     try {
-        const result = parser.parse(text, file.name);
-        state.parts = result.parts;
+        if (ext === 'io') {
+            throw new Error('Studio .io files must be exported as .ldr first. In Studio 2.0: File → Export → Export as LDraw');
+        }
+        
+        const text = await file.text();
+        state.rawLdrContent = text;
+        state.currentModelName = file.name.replace(/\.[^.]+$/, '');
+        
+        await loadLDrawModel(text, file.name);
+        
+    } catch (error) {
+        console.error('Load error:', error);
+        hideLoading();
+        alert('Failed to load file: ' + error.message);
+    }
+}
+
+async function loadLDrawModel(ldrContent, filename) {
+    showLoading('Parsing LDraw file...');
+    
+    try {
+        // Parse parts list from content
+        const partsData = parseLDrawParts(ldrContent);
+        state.parts = partsData.parts;
+        state.partInstances = partsData.instances;
         
         // Select all by default
         state.selectedParts = new Set(state.parts.map((_, i) => i));
         
-        showWorkspace(result.name || file.name);
+        showLoading('Loading 3D geometry...');
+        
+        // Load the actual 3D model using LDrawLoader
+        const group = await new Promise((resolve, reject) => {
+            // Create a blob URL for the LDR content
+            const blob = new Blob([ldrContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            state.ldrawLoader.load(
+                url,
+                (loadedGroup) => {
+                    URL.revokeObjectURL(url);
+                    resolve(loadedGroup);
+                },
+                (progress) => {
+                    if (progress.total) {
+                        const pct = Math.round((progress.loaded / progress.total) * 100);
+                        showLoading(`Loading geometry... ${pct}%`);
+                    }
+                },
+                (error) => {
+                    URL.revokeObjectURL(url);
+                    reject(error);
+                }
+            );
+        });
+        
+        state.builtGroup = group;
+        
+        hideLoading();
+        showWorkspace(state.currentModelName);
         renderPartsList();
         init3DPreview();
+        
     } catch (error) {
-        console.error('Parse error:', error);
-        alert('Failed to parse file: ' + error.message);
+        hideLoading();
+        console.error('LDraw load error:', error);
+        
+        // Fallback to basic cube rendering if LDrawLoader fails
+        console.log('Falling back to basic rendering...');
+        const partsData = parseLDrawParts(ldrContent);
+        state.parts = partsData.parts;
+        state.partInstances = partsData.instances;
+        state.selectedParts = new Set(state.parts.map((_, i) => i));
+        state.builtGroup = null;
+        
+        showWorkspace(state.currentModelName);
+        renderPartsList();
+        init3DPreview();
     }
 }
 
-// Sample Designs
-function setupSamples() {
-    document.querySelectorAll('.sample-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const sample = btn.dataset.sample;
-            loadSample(sample);
+// Parse LDraw content for parts list
+function parseLDrawParts(content) {
+    const lines = content.split('\n').map(l => l.trim());
+    const partCounts = new Map();
+    const instances = [];
+    const submodels = new Map();
+    let currentSubmodel = null;
+    
+    // First pass: collect submodels
+    for (const line of lines) {
+        if (!line) continue;
+        const parts = line.split(/\s+/);
+        
+        if (parts[0] === '0' && parts[1] === 'FILE') {
+            currentSubmodel = parts.slice(2).join(' ').toLowerCase();
+            submodels.set(currentSubmodel, []);
+        } else if (currentSubmodel && submodels.has(currentSubmodel)) {
+            submodels.get(currentSubmodel).push(line);
+        }
+    }
+    
+    // Second pass: parse parts
+    const parseLines = (lineArray) => {
+        for (const line of lineArray) {
+            if (!line) continue;
+            const parts = line.split(/\s+/);
+            const lineType = parseInt(parts[0]);
+            
+            if (lineType === 1 && parts.length >= 15) {
+                const color = parseInt(parts[1]);
+                const x = parseFloat(parts[2]);
+                const y = parseFloat(parts[3]);
+                const z = parseFloat(parts[4]);
+                const partFile = parts.slice(14).join(' ').toLowerCase();
+                
+                // Check if it's a submodel reference
+                if (submodels.has(partFile)) {
+                    parseLines(submodels.get(partFile));
+                } else {
+                    const partId = extractPartId(partFile);
+                    if (partId) {
+                        instances.push({ partId, color, x, y, z, partFile });
+                        
+                        const key = `${partId}|${color}`;
+                        if (!partCounts.has(key)) {
+                            partCounts.set(key, {
+                                id: partId,
+                                name: getPartName(partId),
+                                color: color,
+                                colorName: LDRAW_COLORS[color]?.name || 'Unknown',
+                                quantity: 0
+                            });
+                        }
+                        partCounts.get(key).quantity++;
+                    }
+                }
+            }
+        }
+    };
+    
+    // If MPD with submodels, parse main model; otherwise parse all
+    if (submodels.size > 0) {
+        const mainModel = submodels.keys().next().value;
+        parseLines(submodels.get(mainModel) || lines);
+    } else {
+        parseLines(lines);
+    }
+    
+    const partsArray = Array.from(partCounts.values());
+    partsArray.sort((a, b) => b.quantity - a.quantity);
+    
+    return { parts: partsArray, instances };
+}
+
+function extractPartId(partFile) {
+    let id = partFile.split('/').pop().split('\\').pop();
+    id = id.replace(/\.dat$/i, '').replace(/\.ldr$/i, '');
+    const match = id.match(/^(\d+[a-z]?\d*)/i);
+    return match ? match[1] : null;
+}
+
+function getPartName(partId) {
+    // Common part names
+    const names = {
+        '3001': 'Brick 2x4',
+        '3002': 'Brick 2x3',
+        '3003': 'Brick 2x2',
+        '3004': 'Brick 1x2',
+        '3005': 'Brick 1x1',
+        '3010': 'Brick 1x4',
+        '3020': 'Plate 2x4',
+        '3021': 'Plate 2x3',
+        '3022': 'Plate 2x2',
+        '3023': 'Plate 1x2',
+        '3024': 'Plate 1x1',
+        '3622': 'Brick 1x3',
+        '3710': 'Plate 1x4',
+        '3795': 'Plate 2x6',
+        '3034': 'Plate 2x8',
+        '3832': 'Plate 2x10',
+        '3030': 'Plate 4x10',
+        '3031': 'Plate 4x4',
+        '3032': 'Plate 4x6',
+        '3033': 'Plate 6x10',
+        '3035': 'Plate 4x8',
+        '3036': 'Plate 6x8',
+        '3460': 'Plate 1x8',
+        '3666': 'Plate 1x6',
+        '3039': 'Slope 45 2x2',
+        '3040': 'Slope 45 1x2',
+        '3298': 'Slope 33 3x2',
+        '3037': 'Slope 45 2x4',
+        '3038': 'Slope 45 2x3',
+        '3660': 'Slope Inverted 45 2x2',
+        '3665': 'Slope Inverted 45 1x2',
+        '3700': 'Technic Brick 1x2 with Hole',
+        '3701': 'Technic Brick 1x4 with Holes',
+        '3702': 'Technic Brick 1x8 with Holes',
+        '3703': 'Technic Brick 1x16 with Holes',
+        '32316': 'Technic Liftarm 1x5',
+        '6632': 'Technic Liftarm 1x3',
+        '3749': 'Technic Axle Pin',
+        '2780': 'Technic Pin',
+        '4274': 'Technic Pin 1/2',
+        '6558': 'Technic Pin Long',
+        '32123': 'Technic Bush 1/2',
+        '3713': 'Technic Bush',
+        '3673': 'Technic Pin',
+        '3069b': 'Tile 1x2',
+        '3070b': 'Tile 1x1',
+        '2431': 'Tile 1x4',
+        '6636': 'Tile 1x6',
+        '4162': 'Tile 1x8',
+        '87079': 'Tile 2x4',
+        '3068b': 'Tile 2x2',
+        '63864': 'Tile 1x3',
+        '98138': 'Tile Round 1x1',
+        '15535': 'Tile Round 2x2',
+        '4150': 'Tile Round 2x2',
+        '4073': 'Plate Round 1x1',
+        '6141': 'Plate Round 1x1',
+        '4032': 'Plate Round 2x2',
+        '60474': 'Plate Round 4x4',
+        '85861': 'Plate Round 1x1 with Open Stud',
+        '3062b': 'Brick Round 1x1',
+        '3941': 'Brick Round 2x2',
+        '6143': 'Brick Round 2x2',
+        '98100': 'Cone 1x1 with Top Groove',
+        '4589': 'Cone 1x1',
+        '64288': 'Slope Curved 1x2',
+        '11477': 'Slope Curved 2x1',
+        '15068': 'Slope Curved 2x2',
+        '93273': 'Slope Curved 3x1',
+        '50950': 'Slope Curved 3x1',
+        '61678': 'Slope Curved 4x1',
+        '3045': 'Slope 45 Double 2x2',
+        '3048': 'Slope 45 Double 1x2',
+        '3044': 'Slope 45 Double 2x1',
+        '3245': 'Brick 1x2x2',
+        '2357': 'Brick 2x2 Corner',
+        '6091': 'Brick Curved 2x1',
+        '30165': 'Brick Modified 2x2 Curved Top',
+        '87087': 'Brick Modified 1x1 with Stud on Side',
+        '4070': 'Brick Modified 1x1 with Headlight',
+        '30414': 'Brick Modified 1x4 with Studs on Side',
+        '52107': 'Brick Modified 1x2 with Studs on 2 Sides',
+        '98283': 'Brick Modified 1x2 with Masonry Profile'
+    };
+    return names[partId] || `Part ${partId}`;
+}
+
+// Set Catalog
+function setupCatalog() {
+    const catalogBtn = document.getElementById('catalogBtn');
+    const catalogModal = document.getElementById('catalogModal');
+    const catalogGrid = document.getElementById('catalogGrid');
+    const catalogSearch = document.getElementById('catalogSearch');
+    const categoryFilter = document.getElementById('categoryFilter');
+    
+    catalogBtn.addEventListener('click', () => {
+        catalogModal.style.display = 'flex';
+        renderCatalog();
+    });
+    
+    catalogModal.addEventListener('click', (e) => {
+        if (e.target === catalogModal) {
+            catalogModal.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('closeCatalog').addEventListener('click', () => {
+        catalogModal.style.display = 'none';
+    });
+    
+    catalogSearch.addEventListener('input', renderCatalog);
+    categoryFilter.addEventListener('change', renderCatalog);
+}
+
+function renderCatalog() {
+    const grid = document.getElementById('catalogGrid');
+    const search = document.getElementById('catalogSearch').value.toLowerCase();
+    const category = document.getElementById('categoryFilter').value;
+    
+    let sets = SET_CATALOG;
+    
+    if (search) {
+        sets = sets.filter(s => 
+            s.name.toLowerCase().includes(search) ||
+            s.number.includes(search)
+        );
+    }
+    
+    if (category) {
+        sets = sets.filter(s => s.category === category);
+    }
+    
+    grid.innerHTML = sets.map(set => `
+        <div class="catalog-item" data-set="${set.id}">
+            <div class="catalog-thumb">${set.icon || '🧱'}</div>
+            <div class="catalog-info">
+                <div class="catalog-name">${set.name}</div>
+                <div class="catalog-number">#${set.number} • ${set.pieces} pcs</div>
+            </div>
+        </div>
+    `).join('');
+    
+    grid.querySelectorAll('.catalog-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const setId = item.dataset.set;
+            loadCatalogSet(setId);
         });
     });
 }
 
-async function loadSample(name) {
-    const samples = {
-        car: generateSampleCar(),
-        house: generateSampleHouse(),
-        robot: generateSampleRobot()
-    };
+async function loadCatalogSet(setId) {
+    const set = SET_CATALOG.find(s => s.id === setId);
+    if (!set) return;
     
-    const sample = samples[name];
-    if (sample) {
-        state.parts = sample.parts;
-        state.selectedParts = new Set(state.parts.map((_, i) => i));
-        showWorkspace(sample.name);
-        renderPartsList();
-        init3DPreview();
+    document.getElementById('catalogModal').style.display = 'none';
+    showLoading(`Loading ${set.name}...`);
+    
+    try {
+        // Load the embedded LDR data
+        state.rawLdrContent = set.ldr;
+        state.currentModelName = set.name;
+        await loadLDrawModel(set.ldr, set.name + '.ldr');
+    } catch (error) {
+        hideLoading();
+        alert('Failed to load set: ' + error.message);
     }
-}
-
-function generateSampleCar() {
-    return {
-        name: 'Simple Car',
-        parts: [
-            { id: '3024', name: 'Plate 1x1', color: 4, colorName: 'Red', quantity: 4 },
-            { id: '3023', name: 'Plate 1x2', color: 4, colorName: 'Red', quantity: 6 },
-            { id: '3004', name: 'Brick 1x2', color: 4, colorName: 'Red', quantity: 4 },
-            { id: '3003', name: 'Brick 2x2', color: 4, colorName: 'Red', quantity: 2 },
-            { id: '3022', name: 'Plate 2x2', color: 0, colorName: 'Black', quantity: 2 },
-            { id: '4624', name: 'Wheel Rim', color: 7, colorName: 'Light Gray', quantity: 4 },
-            { id: '3641', name: 'Tire', color: 0, colorName: 'Black', quantity: 4 },
-            { id: '3823', name: 'Windscreen 2x4x2', color: 15, colorName: 'Trans-Clear', quantity: 1 },
-            { id: '3020', name: 'Plate 2x4', color: 4, colorName: 'Red', quantity: 2 },
-        ]
-    };
-}
-
-function generateSampleHouse() {
-    return {
-        name: 'Mini House',
-        parts: [
-            { id: '3001', name: 'Brick 2x4', color: 1, colorName: 'Blue', quantity: 12 },
-            { id: '3003', name: 'Brick 2x2', color: 1, colorName: 'Blue', quantity: 8 },
-            { id: '3004', name: 'Brick 1x2', color: 1, colorName: 'Blue', quantity: 6 },
-            { id: '3005', name: 'Brick 1x1', color: 1, colorName: 'Blue', quantity: 4 },
-            { id: '3020', name: 'Plate 2x4', color: 2, colorName: 'Green', quantity: 4 },
-            { id: '3795', name: 'Plate 2x6', color: 2, colorName: 'Green', quantity: 2 },
-            { id: '3039', name: 'Slope 45 2x2', color: 4, colorName: 'Red', quantity: 4 },
-            { id: '3040', name: 'Slope 45 1x2', color: 4, colorName: 'Red', quantity: 4 },
-            { id: '60601', name: 'Window 1x2x2', color: 15, colorName: 'Trans-Clear', quantity: 2 },
-            { id: '3023', name: 'Plate 1x2', color: 6, colorName: 'Brown', quantity: 2 },
-        ]
-    };
-}
-
-function generateSampleRobot() {
-    return {
-        name: 'Simple Robot',
-        parts: [
-            { id: '3003', name: 'Brick 2x2', color: 7, colorName: 'Light Gray', quantity: 3 },
-            { id: '3004', name: 'Brick 1x2', color: 7, colorName: 'Light Gray', quantity: 6 },
-            { id: '3005', name: 'Brick 1x1', color: 0, colorName: 'Black', quantity: 2 },
-            { id: '3024', name: 'Plate 1x1', color: 4, colorName: 'Red', quantity: 2 },
-            { id: '3023', name: 'Plate 1x2', color: 7, colorName: 'Light Gray', quantity: 4 },
-            { id: '3622', name: 'Brick 1x3', color: 7, colorName: 'Light Gray', quantity: 4 },
-            { id: '4070', name: 'Brick Modified 1x1 Headlight', color: 14, colorName: 'Yellow', quantity: 2 },
-            { id: '3024', name: 'Plate 1x1 Round', color: 4, colorName: 'Red', quantity: 1 },
-            { id: '4589', name: 'Cone 1x1', color: 14, colorName: 'Yellow', quantity: 1 },
-        ]
-    };
 }
 
 // Workspace
@@ -177,8 +452,18 @@ function setupWorkspace() {
         renderPartsList();
     });
 
-    document.getElementById('showSelected').addEventListener('change', updatePreview);
+    // View mode toggle
+    document.getElementById('viewBuilt').addEventListener('click', () => setViewMode('built'));
+    document.getElementById('viewParts').addEventListener('click', () => setViewMode('parts'));
+    
     document.getElementById('resetView').addEventListener('click', resetCameraView);
+}
+
+function setViewMode(mode) {
+    state.viewMode = mode;
+    document.getElementById('viewBuilt').classList.toggle('active', mode === 'built');
+    document.getElementById('viewParts').classList.toggle('active', mode === 'parts');
+    updatePreview();
 }
 
 function showWorkspace(name) {
@@ -187,13 +472,34 @@ function showWorkspace(name) {
     document.querySelector('.upload-section').style.display = 'none';
 }
 
+function showLoading(message) {
+    let loader = document.getElementById('loadingOverlay');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'loadingOverlay';
+        loader.innerHTML = `
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <div class="loading-text"></div>
+            </div>
+        `;
+        document.body.appendChild(loader);
+    }
+    loader.querySelector('.loading-text').textContent = message;
+    loader.style.display = 'flex';
+}
+
+function hideLoading() {
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) loader.style.display = 'none';
+}
+
 function renderPartsList(filter = '') {
     const container = document.getElementById('partsList');
     const sortBy = document.getElementById('sortParts').value;
     
     let parts = state.parts.map((part, index) => ({ ...part, index }));
     
-    // Filter
     if (filter) {
         const lowerFilter = filter.toLowerCase();
         parts = parts.filter(p => 
@@ -203,7 +509,6 @@ function renderPartsList(filter = '') {
         );
     }
     
-    // Sort
     parts.sort((a, b) => {
         switch (sortBy) {
             case 'quantity': return b.quantity - a.quantity;
@@ -220,30 +525,24 @@ function renderPartsList(filter = '') {
         return `
             <div class="part-item ${isSelected ? 'selected' : ''}" data-index="${part.index}">
                 <input type="checkbox" class="part-checkbox" ${isSelected ? 'checked' : ''}>
-                <div class="part-preview">🧱</div>
+                <div class="part-color-dot" style="background: ${color.hex}"></div>
                 <div class="part-info">
                     <div class="part-name">${part.name}</div>
-                    <div class="part-details">
-                        <span class="part-color" style="background: ${color.hex}"></span>
-                        ${part.colorName} • #${part.id}
-                    </div>
+                    <div class="part-details">${part.colorName} • #${part.id}</div>
                 </div>
                 <div class="part-quantity">×${part.quantity}</div>
             </div>
         `;
     }).join('');
     
-    // Add click handlers
     container.querySelectorAll('.part-item').forEach(item => {
         item.addEventListener('click', (e) => {
             if (e.target.type === 'checkbox') return;
-            const index = parseInt(item.dataset.index);
-            togglePart(index);
+            togglePart(parseInt(item.dataset.index));
         });
         
         item.querySelector('.part-checkbox').addEventListener('change', (e) => {
-            const index = parseInt(item.dataset.index);
-            togglePart(index, e.target.checked);
+            togglePart(parseInt(item.dataset.index), e.target.checked);
         });
     });
     
@@ -258,11 +557,7 @@ function togglePart(index, force = null) {
             state.selectedParts.add(index);
         }
     } else {
-        if (force) {
-            state.selectedParts.add(index);
-        } else {
-            state.selectedParts.delete(index);
-        }
+        force ? state.selectedParts.add(index) : state.selectedParts.delete(index);
     }
     
     renderPartsList(document.getElementById('searchParts').value);
@@ -272,11 +567,13 @@ function togglePart(index, force = null) {
 function updateCounts() {
     const totalUnique = state.parts.length;
     const selectedUnique = state.selectedParts.size;
+    const totalPieces = state.parts.reduce((sum, p) => sum + p.quantity, 0);
     const selectedPieces = Array.from(state.selectedParts).reduce((sum, i) => 
         sum + state.parts[i].quantity, 0);
     
     document.getElementById('totalCount').textContent = totalUnique;
     document.getElementById('selectedCount').textContent = selectedUnique;
+    document.getElementById('totalPieces').textContent = totalPieces;
     document.getElementById('selectedPieces').textContent = selectedPieces;
 }
 
@@ -285,41 +582,40 @@ function init3DPreview() {
     const container = document.getElementById('preview3d');
     container.innerHTML = '';
     
-    // Scene
     state.scene = new THREE.Scene();
     state.scene.background = new THREE.Color(0x1a1a2e);
     
-    // Camera
     state.camera = new THREE.PerspectiveCamera(
-        50, container.clientWidth / container.clientHeight, 0.1, 1000
+        50, container.clientWidth / container.clientHeight, 0.1, 10000
     );
-    state.camera.position.set(10, 10, 10);
+    state.camera.position.set(200, 200, 200);
     
-    // Renderer
     state.renderer = new THREE.WebGLRenderer({ antialias: true });
     state.renderer.setSize(container.clientWidth, container.clientHeight);
+    state.renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(state.renderer.domElement);
     
-    // Controls
     state.controls = new OrbitControls(state.camera, state.renderer.domElement);
     state.controls.enableDamping = true;
     
-    // Lights
+    // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     state.scene.add(ambientLight);
     
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(10, 20, 10);
+    directionalLight.position.set(100, 200, 100);
     state.scene.add(directionalLight);
     
+    const backLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    backLight.position.set(-100, 100, -100);
+    state.scene.add(backLight);
+    
     // Grid
-    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x333333);
+    const gridHelper = new THREE.GridHelper(500, 50, 0x444444, 0x333333);
     state.scene.add(gridHelper);
     
-    // Add parts visualization
     updatePreview();
     
-    // Animation loop
     function animate() {
         requestAnimationFrame(animate);
         state.controls.update();
@@ -327,7 +623,6 @@ function init3DPreview() {
     }
     animate();
     
-    // Handle resize
     window.addEventListener('resize', () => {
         state.camera.aspect = container.clientWidth / container.clientHeight;
         state.camera.updateProjectionMatrix();
@@ -338,35 +633,189 @@ function init3DPreview() {
 function updatePreview() {
     if (!state.scene) return;
     
-    const showSelectedOnly = document.getElementById('showSelected').checked;
+    // Remove existing model groups
+    if (state.builtGroup) {
+        state.scene.remove(state.builtGroup);
+    }
+    if (state.partsGroup) {
+        state.scene.remove(state.partsGroup);
+    }
     
-    // Clear existing meshes
-    state.partMeshes.forEach(mesh => state.scene.remove(mesh));
-    state.partMeshes.clear();
-    
-    // Create simple brick representations
-    let offset = 0;
-    state.parts.forEach((part, index) => {
-        if (showSelectedOnly && !state.selectedParts.has(index)) return;
+    if (state.viewMode === 'built' && state.builtGroup) {
+        // Show assembled model
+        state.scene.add(state.builtGroup);
         
-        const color = LDRAW_COLORS[part.color] || { hex: '#888888' };
-        const geometry = new THREE.BoxGeometry(0.8, 0.96, 0.8);
-        const material = new THREE.MeshPhongMaterial({ 
-            color: color.hex,
-            opacity: state.selectedParts.has(index) ? 1 : 0.3,
-            transparent: !state.selectedParts.has(index)
+        // Center camera on model
+        const box = new THREE.Box3().setFromObject(state.builtGroup);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3()).length();
+        
+        state.controls.target.copy(center);
+        state.camera.position.set(center.x + size, center.y + size * 0.5, center.z + size);
+        state.controls.update();
+        
+    } else {
+        // Show parts laid out (fallback or parts view)
+        state.partsGroup = new THREE.Group();
+        
+        const cols = Math.ceil(Math.sqrt(state.parts.length));
+        const spacing = 50;
+        
+        state.parts.forEach((part, index) => {
+            const isSelected = state.selectedParts.has(index);
+            const color = LDRAW_COLORS[part.color] || { hex: '#888888' };
+            
+            // Create brick geometry based on part type
+            const geometry = createBrickGeometry(part.id);
+            const material = new THREE.MeshPhongMaterial({ 
+                color: color.hex,
+                opacity: isSelected ? 1 : 0.3,
+                transparent: !isSelected,
+                flatShading: false
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            const row = Math.floor(index / cols);
+            const col = index % cols;
+            mesh.position.set(col * spacing - (cols * spacing / 2), 0, row * spacing - (cols * spacing / 2));
+            
+            state.partsGroup.add(mesh);
         });
         
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(offset % 10 - 5, 0.48, Math.floor(offset / 10) - 2);
-        state.scene.add(mesh);
-        state.partMeshes.set(index, mesh);
-        offset++;
+        state.scene.add(state.partsGroup);
+        
+        // Center view on parts grid
+        state.controls.target.set(0, 0, 0);
+    }
+}
+
+// Create approximate brick geometry based on part ID
+function createBrickGeometry(partId) {
+    // Parse common brick dimensions from ID
+    const id = partId.toLowerCase();
+    
+    // Unit sizes (LDraw units)
+    const STUD = 20;  // 1 stud = 20 LDU
+    const PLATE_HEIGHT = 8;
+    const BRICK_HEIGHT = 24;
+    
+    // Default 1x1 brick
+    let width = STUD;
+    let height = BRICK_HEIGHT;
+    let depth = STUD;
+    
+    // Plates (3020-3024, etc)
+    if (id.startsWith('302') || id.match(/plate/i)) {
+        height = PLATE_HEIGHT;
+        const dims = parseDimensions(id);
+        width = dims.x * STUD;
+        depth = dims.z * STUD;
+    }
+    // Standard bricks (3001-3010, etc)
+    else if (id.startsWith('300') || id.startsWith('301') || id.match(/brick/i)) {
+        const dims = parseDimensions(id);
+        width = dims.x * STUD;
+        depth = dims.z * STUD;
+    }
+    // Slopes
+    else if (id.startsWith('303') || id.startsWith('304') || id.match(/slope/i)) {
+        const dims = parseDimensions(id);
+        width = dims.x * STUD;
+        depth = dims.z * STUD;
+    }
+    // Tiles
+    else if (id.match(/tile/i) || id.startsWith('306') || id.startsWith('307')) {
+        height = 4;
+        const dims = parseDimensions(id);
+        width = dims.x * STUD;
+        depth = dims.z * STUD;
+    }
+    
+    // Add studs on top
+    const group = new THREE.Group();
+    
+    // Main body
+    const bodyGeometry = new THREE.BoxGeometry(width * 0.95, height, depth * 0.95);
+    const body = new THREE.Mesh(bodyGeometry);
+    body.position.y = height / 2;
+    group.add(body);
+    
+    // Studs
+    const studGeometry = new THREE.CylinderGeometry(6, 6, 4, 16);
+    const studsX = Math.round(width / STUD);
+    const studsZ = Math.round(depth / STUD);
+    
+    for (let sx = 0; sx < studsX; sx++) {
+        for (let sz = 0; sz < studsZ; sz++) {
+            const stud = new THREE.Mesh(studGeometry);
+            stud.position.set(
+                (sx - (studsX - 1) / 2) * STUD,
+                height + 2,
+                (sz - (studsZ - 1) / 2) * STUD
+            );
+            group.add(stud);
+        }
+    }
+    
+    // Merge into single geometry
+    const geometries = [];
+    group.traverse(child => {
+        if (child.geometry) {
+            const geo = child.geometry.clone();
+            geo.translate(child.position.x, child.position.y, child.position.z);
+            geometries.push(geo);
+        }
     });
+    
+    return mergeGeometries(geometries);
+}
+
+function parseDimensions(partId) {
+    // Try to extract dimensions from part ID
+    // Common patterns: 3001 = 2x4, 3003 = 2x2, 3004 = 1x2, etc.
+    const knownDims = {
+        '3001': { x: 2, z: 4 },
+        '3002': { x: 2, z: 3 },
+        '3003': { x: 2, z: 2 },
+        '3004': { x: 1, z: 2 },
+        '3005': { x: 1, z: 1 },
+        '3006': { x: 2, z: 10 },
+        '3007': { x: 2, z: 8 },
+        '3008': { x: 1, z: 8 },
+        '3009': { x: 1, z: 6 },
+        '3010': { x: 1, z: 4 },
+        '3020': { x: 2, z: 4 },
+        '3021': { x: 2, z: 3 },
+        '3022': { x: 2, z: 2 },
+        '3023': { x: 1, z: 2 },
+        '3024': { x: 1, z: 1 },
+        '3034': { x: 2, z: 8 },
+        '3795': { x: 2, z: 6 },
+        '3710': { x: 1, z: 4 },
+        '3666': { x: 1, z: 6 },
+        '3460': { x: 1, z: 8 },
+        '3622': { x: 1, z: 3 },
+        '3030': { x: 4, z: 10 },
+        '3031': { x: 4, z: 4 },
+        '3032': { x: 4, z: 6 },
+        '3033': { x: 6, z: 10 },
+        '3035': { x: 4, z: 8 },
+        '3036': { x: 6, z: 8 }
+    };
+    
+    if (knownDims[partId]) return knownDims[partId];
+    
+    // Try to parse from ID pattern
+    const match = partId.match(/(\d)x(\d+)/i);
+    if (match) {
+        return { x: parseInt(match[1]), z: parseInt(match[2]) };
+    }
+    
+    return { x: 1, z: 1 };
 }
 
 function resetCameraView() {
-    state.camera.position.set(10, 10, 10);
+    state.camera.position.set(200, 200, 200);
     state.controls.target.set(0, 0, 0);
     state.controls.update();
 }
@@ -396,25 +845,117 @@ function hideExportModal() {
 
 async function performExport() {
     const scale = parseFloat(document.getElementById('exportScale').value) || 1;
-    const combine = document.getElementById('combineParts').checked;
     const hollow = document.getElementById('hollowParts').checked;
     
-    const exporter = new STLExporter();
-    const selectedParts = Array.from(state.selectedParts).map(i => state.parts[i]);
+    showLoading('Generating STL...');
     
-    if (combine) {
-        // Export all as single STL
-        const stl = await exporter.exportParts(selectedParts, { scale, hollow });
-        downloadFile(stl, 'lego-parts-combined.stl');
+    try {
+        // Create geometry for all selected parts
+        const geometries = [];
+        const spacing = 50;
+        const cols = Math.ceil(Math.sqrt(state.selectedParts.size));
+        
+        let index = 0;
+        for (const partIndex of state.selectedParts) {
+            const part = state.parts[partIndex];
+            const geo = createBrickGeometry(part.id);
+            
+            // Position in grid
+            const row = Math.floor(index / cols);
+            const col = index % cols;
+            
+            geo.translate(
+                col * spacing * scale,
+                0,
+                row * spacing * scale
+            );
+            
+            geo.scale(scale, scale, scale);
+            geometries.push(geo);
+            index++;
+        }
+        
+        if (geometries.length === 0) {
+            hideLoading();
+            alert('No parts selected!');
+            return;
+        }
+        
+        const mergedGeometry = mergeGeometries(geometries);
+        const stlData = exportToSTL(mergedGeometry);
+        
+        downloadFile(stlData, `${state.currentModelName || 'lego-parts'}.stl`);
+        hideLoading();
+        hideExportModal();
+        
+    } catch (error) {
+        hideLoading();
+        alert('Export failed: ' + error.message);
+    }
+}
+
+function exportToSTL(geometry) {
+    // Binary STL format
+    const positions = geometry.attributes.position.array;
+    const indices = geometry.index ? geometry.index.array : null;
+    
+    let triangles = [];
+    
+    if (indices) {
+        for (let i = 0; i < indices.length; i += 3) {
+            triangles.push([
+                [positions[indices[i] * 3], positions[indices[i] * 3 + 1], positions[indices[i] * 3 + 2]],
+                [positions[indices[i + 1] * 3], positions[indices[i + 1] * 3 + 1], positions[indices[i + 1] * 3 + 2]],
+                [positions[indices[i + 2] * 3], positions[indices[i + 2] * 3 + 1], positions[indices[i + 2] * 3 + 2]]
+            ]);
+        }
     } else {
-        // Export as ZIP with individual files
-        const files = await exporter.exportPartsIndividual(selectedParts, { scale, hollow });
-        // For now, just export combined
-        const stl = await exporter.exportParts(selectedParts, { scale, hollow });
-        downloadFile(stl, 'lego-parts.stl');
+        for (let i = 0; i < positions.length; i += 9) {
+            triangles.push([
+                [positions[i], positions[i + 1], positions[i + 2]],
+                [positions[i + 3], positions[i + 4], positions[i + 5]],
+                [positions[i + 6], positions[i + 7], positions[i + 8]]
+            ]);
+        }
     }
     
-    hideExportModal();
+    const bufferSize = 84 + (50 * triangles.length);
+    const buffer = new ArrayBuffer(bufferSize);
+    const view = new DataView(buffer);
+    
+    // Header (80 bytes)
+    for (let i = 0; i < 80; i++) {
+        view.setUint8(i, 0);
+    }
+    
+    // Triangle count
+    view.setUint32(80, triangles.length, true);
+    
+    let offset = 84;
+    for (const tri of triangles) {
+        // Calculate normal
+        const v1 = tri[0], v2 = tri[1], v3 = tri[2];
+        const ax = v2[0] - v1[0], ay = v2[1] - v1[1], az = v2[2] - v1[2];
+        const bx = v3[0] - v1[0], by = v3[1] - v1[1], bz = v3[2] - v1[2];
+        const nx = ay * bz - az * by;
+        const ny = az * bx - ax * bz;
+        const nz = ax * by - ay * bx;
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        
+        view.setFloat32(offset, nx / len, true); offset += 4;
+        view.setFloat32(offset, ny / len, true); offset += 4;
+        view.setFloat32(offset, nz / len, true); offset += 4;
+        
+        for (const v of tri) {
+            view.setFloat32(offset, v[0], true); offset += 4;
+            view.setFloat32(offset, v[1], true); offset += 4;
+            view.setFloat32(offset, v[2], true); offset += 4;
+        }
+        
+        view.setUint16(offset, 0, true); offset += 2;
+    }
+    
+    return buffer;
 }
 
 function downloadFile(content, filename) {

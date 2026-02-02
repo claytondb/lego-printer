@@ -3,108 +3,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lego Piece Printer</title>
+    <title>Lego Piece Printer - 3D Print Your Lego Sets</title>
     <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
     <div class="app">
         <header>
             <h1>🧱 Lego Piece Printer</h1>
-            <p>Load a Lego design, select the pieces you need, export to STL</p>
+            <p>Load a Lego design, select pieces you need, export to STL for 3D printing</p>
         </header>
 
-        <main>
-            <section class="upload-section">
-                <div class="upload-zone" id="uploadZone">
-                    <input type="file" id="fileInput" accept=".ldr,.mpd,.dat,.io,.lxf" hidden>
-                    <div class="upload-content">
-                        <span class="upload-icon">📁</span>
-                        <p>Drop LDraw file here or click to browse</p>
-                        <p class="upload-hint">Supports: .ldr, .mpd, .dat (LDraw), .io (Studio 2.0)</p>
-                    </div>
+        <section class="upload-section">
+            <div class="upload-options">
+                <div id="uploadZone" class="upload-zone">
+                    <div class="upload-icon">📁</div>
+                    <p>Drop LDraw file here or click to upload</p>
+                    <span class="upload-formats">Supports: .ldr, .mpd, .dat</span>
+                    <input type="file" id="fileInput" accept=".ldr,.mpd,.dat,.io" hidden>
                 </div>
-                <div class="sample-designs">
-                    <p>Or try a sample:</p>
-                    <button class="sample-btn" data-sample="car">🚗 Simple Car</button>
-                    <button class="sample-btn" data-sample="house">🏠 Mini House</button>
+                
+                <div class="divider">or</div>
+                
+                <button id="catalogBtn" class="catalog-btn">
+                    <span class="catalog-icon">📚</span>
+                    Browse Set Catalog
+                </button>
+            </div>
+            
+            <div class="sample-designs">
+                <p>Don't have a file? Try a sample:</p>
+                <div class="sample-buttons">
+                    <button class="sample-btn" data-sample="car">🚗 Car</button>
+                    <button class="sample-btn" data-sample="house">🏠 House</button>
                     <button class="sample-btn" data-sample="robot">🤖 Robot</button>
                 </div>
-            </section>
+            </div>
+        </section>
 
-            <section class="workspace" id="workspace" style="display: none;">
-                <div class="workspace-header">
-                    <h2 id="designName">Design Name</h2>
-                    <div class="workspace-actions">
-                        <button id="selectAll" class="btn">Select All</button>
-                        <button id="selectNone" class="btn">Select None</button>
-                        <button id="exportSTL" class="btn btn-primary">Export STL</button>
-                    </div>
-                </div>
-
-                <div class="workspace-content">
-                    <div class="preview-panel">
-                        <div id="preview3d" class="preview-3d"></div>
-                        <div class="preview-controls">
-                            <button id="resetView" class="btn-small">Reset View</button>
-                            <label><input type="checkbox" id="showSelected" checked> Show only selected</label>
-                        </div>
-                    </div>
-
-                    <div class="parts-panel">
-                        <div class="parts-header">
-                            <h3>Parts List</h3>
-                            <div class="parts-summary">
-                                <span id="selectedCount">0</span> / <span id="totalCount">0</span> selected
-                                (<span id="selectedPieces">0</span> pieces)
-                            </div>
-                        </div>
-                        <div class="parts-filters">
-                            <input type="text" id="searchParts" placeholder="Search parts...">
-                            <select id="sortParts">
-                                <option value="quantity">Sort by Quantity</option>
-                                <option value="name">Sort by Name</option>
-                                <option value="color">Sort by Color</option>
-                            </select>
-                        </div>
-                        <div class="parts-list" id="partsList"></div>
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <div class="modal" id="exportModal" style="display: none;">
-            <div class="modal-content">
-                <h3>Export Settings</h3>
-                <div class="export-options">
-                    <label>
-                        Scale:
-                        <select id="exportScale">
-                            <option value="1">1:1 (Real Lego size)</option>
-                            <option value="2">2x Scale</option>
-                            <option value="0.5">0.5x Scale</option>
-                            <option value="custom">Custom...</option>
-                        </select>
-                    </label>
-                    <label>
-                        <input type="checkbox" id="combineParts"> Combine into single STL
-                    </label>
-                    <label>
-                        <input type="checkbox" id="hollowParts" checked> Hollow parts (save material)
-                    </label>
-                </div>
-                <div class="export-preview">
-                    <p>Exporting <span id="exportCount">0</span> unique parts (<span id="exportPieces">0</span> total pieces)</p>
-                </div>
-                <div class="modal-actions">
-                    <button id="cancelExport" class="btn">Cancel</button>
-                    <button id="confirmExport" class="btn btn-primary">Download STL</button>
+        <section id="workspace" class="workspace" style="display: none;">
+            <div class="workspace-header">
+                <h2 id="designName">Model Name</h2>
+                <div class="workspace-actions">
+                    <button id="selectAll">Select All</button>
+                    <button id="selectNone">Select None</button>
+                    <button id="exportSTL" class="primary">Export STL</button>
                 </div>
             </div>
-        </div>
 
-        <footer>
-            <p>Uses <a href="https://www.ldraw.org/" target="_blank">LDraw</a> parts library</p>
-        </footer>
+            <div class="workspace-content">
+                <div class="preview-panel">
+                    <div class="preview-header">
+                        <div class="view-toggle">
+                            <button id="viewBuilt" class="view-btn active">🏗️ Built</button>
+                            <button id="viewParts" class="view-btn">🧩 Parts</button>
+                        </div>
+                        <button id="resetView" class="icon-btn" title="Reset View">🔄</button>
+                    </div>
+                    <div id="preview3d" class="preview-3d"></div>
+                </div>
+
+                <div class="parts-panel">
+                    <div class="parts-header">
+                        <h3>Parts List</h3>
+                        <div class="parts-stats">
+                            <span><strong id="selectedCount">0</strong>/<span id="totalCount">0</span> types</span>
+                            <span class="stat-divider">•</span>
+                            <span><strong id="selectedPieces">0</strong>/<span id="totalPieces">0</span> pieces</span>
+                        </div>
+                    </div>
+                    
+                    <div class="parts-toolbar">
+                        <input type="text" id="searchParts" placeholder="Search parts...">
+                        <select id="sortParts">
+                            <option value="quantity">Sort by Quantity</option>
+                            <option value="name">Sort by Name</option>
+                            <option value="color">Sort by Color</option>
+                        </select>
+                    </div>
+
+                    <div id="partsList" class="parts-list"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Catalog Modal -->
+    <div id="catalogModal" class="modal">
+        <div class="modal-content catalog-modal">
+            <div class="modal-header">
+                <h2>📚 Set Catalog</h2>
+                <button id="closeCatalog" class="close-btn">&times;</button>
+            </div>
+            
+            <div class="catalog-filters">
+                <input type="text" id="catalogSearch" placeholder="Search sets...">
+                <select id="categoryFilter">
+                    <option value="">All Categories</option>
+                    <option value="vehicles">🚗 Vehicles</option>
+                    <option value="buildings">🏠 Buildings</option>
+                    <option value="space">🚀 Space</option>
+                    <option value="figures">🤖 Figures</option>
+                    <option value="animals">🦆 Animals</option>
+                    <option value="nature">🌳 Nature</option>
+                    <option value="decorative">❤️ Decorative</option>
+                </select>
+            </div>
+            
+            <div id="catalogGrid" class="catalog-grid"></div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <h2>Export to STL</h2>
+            
+            <div class="export-stats">
+                <p>Selected: <strong id="exportCount">0</strong> unique parts (<strong id="exportPieces">0</strong> total pieces)</p>
+            </div>
+
+            <div class="export-options">
+                <div class="option-group">
+                    <label for="exportScale">Scale Factor</label>
+                    <input type="number" id="exportScale" value="1" min="0.1" max="10" step="0.1">
+                    <span class="option-hint">1 = actual Lego size</span>
+                </div>
+
+                <div class="option-group">
+                    <label>
+                        <input type="checkbox" id="combineParts" checked>
+                        Combine into single file
+                    </label>
+                </div>
+
+                <div class="option-group">
+                    <label>
+                        <input type="checkbox" id="hollowParts">
+                        Hollow parts (save material)
+                    </label>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="cancelExport">Cancel</button>
+                <button id="confirmExport" class="primary">Download STL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading...</div>
+        </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>
