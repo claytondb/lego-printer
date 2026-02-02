@@ -249,6 +249,7 @@ header p {
     grid-template-columns: 1fr 400px;
     height: calc(100vh - 280px);
     min-height: 500px;
+    max-height: calc(100vh - 200px);
 }
 
 /* Preview Panel */
@@ -327,6 +328,8 @@ header p {
     display: flex;
     flex-direction: column;
     background: var(--bg-secondary);
+    min-height: 0;
+    overflow: hidden;
 }
 
 .parts-header {
