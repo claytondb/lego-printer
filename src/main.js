@@ -21,6 +21,7 @@ const state = {
     partsGroup: null,       // Group for laid-out parts
     viewMode: 'built',      // 'built' or 'parts'
     currentModelName: '',
+    currentSetNum: '',      // Current set number (e.g. "75192-1")
     rawLdrContent: null,    // Store raw LDR for parsing
     colorFilter: '',        // Current color filter
     searchPage: 1,          // Rebrickable search page
@@ -326,6 +327,7 @@ async function loadRebrickableSet(setNum) {
         ]);
         
         state.currentModelName = setDetails.name;
+        state.currentSetNum = setNum;
         state.parts = parts.filter(p => !p.isSpare).map(p => ({
             id: p.id,
             name: p.name,
@@ -801,6 +803,43 @@ function setupWorkspace() {
     
     document.getElementById('centerView').addEventListener('click', centerView);
     document.getElementById('resetView').addEventListener('click', resetCameraView);
+    
+    // Instructions modal
+    document.getElementById('viewInstructions').addEventListener('click', showInstructionsModal);
+    document.getElementById('closeInstructions').addEventListener('click', () => {
+        document.getElementById('instructionsModal').style.display = 'none';
+    });
+    document.getElementById('instructionsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'instructionsModal') {
+            document.getElementById('instructionsModal').style.display = 'none';
+        }
+    });
+}
+
+function showInstructionsModal() {
+    const setNum = state.currentSetNum;
+    if (!setNum) {
+        alert('No set loaded. Load a set first to view instructions.');
+        return;
+    }
+    
+    // Extract just the number part (e.g., "75192-1" -> "75192")
+    const baseNum = setNum.replace(/-\d+$/, '');
+    
+    // Update links
+    document.getElementById('legoInstructionsLink').href = 
+        `https://www.lego.com/en-us/service/buildinginstructions/${baseNum}`;
+    
+    document.getElementById('legoPdfLink').href = 
+        `https://www.lego.com/cdn/product-assets/product.bi.core.pdf/${baseNum}.pdf`;
+    
+    document.getElementById('rebrickableLink').href = 
+        `https://rebrickable.com/sets/${setNum}/`;
+    
+    document.getElementById('bricklinkLink').href = 
+        `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${setNum}#T=I`;
+    
+    document.getElementById('instructionsModal').style.display = 'flex';
 }
 
 function setViewMode(mode) {

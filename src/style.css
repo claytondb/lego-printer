@@ -988,6 +988,89 @@ header p {
     font-size: 0.95rem;
 }
 
+/* Icon text button */
+.icon-text-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Instructions Modal */
+.instructions-modal {
+    max-width: 500px;
+}
+
+.instructions-content {
+    padding: 10px 0;
+}
+
+.instructions-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.instructions-options > p {
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.instructions-link {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.instructions-link:hover {
+    border-color: var(--accent);
+    transform: translateX(4px);
+}
+
+.link-icon {
+    font-size: 1.8rem;
+}
+
+.link-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.link-text strong {
+    font-size: 1rem;
+}
+
+.link-text small {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.link-arrow {
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+}
+
+.instructions-note {
+    margin-top: 20px;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.instructions-note p {
+    margin: 0;
+}
+
 .option-hint {
     font-size: 0.85rem;
     color: var(--text-secondary);

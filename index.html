@@ -52,6 +52,7 @@
             <div class="workspace-header">
                 <h2 id="designName">Model Name</h2>
                 <div class="workspace-actions">
+                    <button id="viewInstructions" class="icon-text-btn" title="View Building Instructions">📖 Instructions</button>
                     <button id="selectAll">Select All</button>
                     <button id="selectNone">Select None</button>
                     <button id="selectNeed" class="accent" title="Select only parts you don't have">Select Need</button>
@@ -222,6 +223,62 @@
             <div class="modal-actions">
                 <button id="cancelExport">Cancel</button>
                 <button id="confirmExport" class="primary">Download STL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instructions Modal -->
+    <div id="instructionsModal" class="modal">
+        <div class="modal-content instructions-modal">
+            <div class="modal-header">
+                <h2>📖 Building Instructions</h2>
+                <button id="closeInstructions" class="close-btn">&times;</button>
+            </div>
+            
+            <div id="instructionsContent" class="instructions-content">
+                <div class="instructions-options">
+                    <p>View official LEGO building instructions:</p>
+                    
+                    <a id="legoInstructionsLink" href="#" target="_blank" class="instructions-link">
+                        <span class="link-icon">🏠</span>
+                        <span class="link-text">
+                            <strong>LEGO.com Instructions</strong>
+                            <small>Official instructions page</small>
+                        </span>
+                        <span class="link-arrow">→</span>
+                    </a>
+                    
+                    <a id="legoPdfLink" href="#" target="_blank" class="instructions-link">
+                        <span class="link-icon">📄</span>
+                        <span class="link-text">
+                            <strong>Download PDF</strong>
+                            <small>Direct PDF download</small>
+                        </span>
+                        <span class="link-arrow">→</span>
+                    </a>
+                    
+                    <a id="rebrickableLink" href="#" target="_blank" class="instructions-link">
+                        <span class="link-icon">🧱</span>
+                        <span class="link-text">
+                            <strong>Rebrickable</strong>
+                            <small>Alternative instructions & MOCs</small>
+                        </span>
+                        <span class="link-arrow">→</span>
+                    </a>
+                    
+                    <a id="bricklinkLink" href="#" target="_blank" class="instructions-link">
+                        <span class="link-icon">🔗</span>
+                        <span class="link-text">
+                            <strong>BrickLink</strong>
+                            <small>Scanned instructions archive</small>
+                        </span>
+                        <span class="link-arrow">→</span>
+                    </a>
+                </div>
+                
+                <div class="instructions-note">
+                    <p>💡 Most LEGO sets from 2005+ have free PDF instructions on LEGO.com</p>
+                </div>
             </div>
         </div>
     </div>
