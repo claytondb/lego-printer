@@ -1079,7 +1079,7 @@ async function updatePreview() {
         state.controls.update();
         
     } else {
-        // Show parts laid out (fallback or parts view)
+        // Show parts laid out with images or 3D geometry
         state.partsGroup = new THREE.Group();
         state.scene.add(state.partsGroup);
         
@@ -1089,78 +1089,111 @@ async function updatePreview() {
         }
         
         const cols = Math.ceil(Math.sqrt(state.parts.length));
-        const spacing = 60;
+        const spacing = 80;
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.crossOrigin = 'anonymous';
         
-        // Create placeholder boxes immediately
-        const placeholders = [];
-        const placeholderMaterial = new THREE.MeshPhongMaterial({ 
-            color: 0x444444,
-            opacity: 0.3,
-            transparent: true
-        });
-        const placeholderGeometry = new THREE.BoxGeometry(40, 24, 40);
-        
-        state.parts.forEach((part, index) => {
-            const row = Math.floor(index / cols);
-            const col = index % cols;
-            const x = col * spacing - (cols * spacing / 2);
-            const z = row * spacing - (Math.ceil(state.parts.length / cols) * spacing / 2);
-            
-            const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
-            placeholder.position.set(x, 12, z);
-            state.partsGroup.add(placeholder);
-            placeholders.push({ mesh: placeholder, x, z, index });
-        });
-        
-        // Center camera on placeholders
-        centerOnGroup(state.partsGroup);
-        
-        // Show loading status
-        const statusEl = document.getElementById('loadingStatus');
-        if (statusEl) statusEl.style.display = 'block';
-        
-        // Load real geometries progressively
         let loaded = 0;
         const total = state.parts.length;
+        updateLoadingStatus(`Loading parts: 0/${total}`);
         
         for (let i = 0; i < state.parts.length; i++) {
             const part = state.parts[i];
-            const placeholder = placeholders[i];
+            const row = Math.floor(i / cols);
+            const col = i % cols;
+            const x = col * spacing - (cols * spacing / 2);
+            const z = row * spacing - (Math.ceil(state.parts.length / cols) * spacing / 2);
             
-            try {
-                const geometry = await getPartGeometry(part.id);
-                const isSelected = state.selectedParts.has(i);
-                const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
-                
-                const material = new THREE.MeshPhongMaterial({ 
-                    color: colorHex,
-                    opacity: isSelected ? 1 : 0.5,
-                    transparent: !isSelected,
-                    flatShading: false
-                });
-                
-                const mesh = new THREE.Mesh(geometry, material);
-                mesh.position.set(placeholder.x, 0, placeholder.z);
-                
-                // Remove placeholder and add real mesh
-                state.partsGroup.remove(placeholder.mesh);
-                state.partsGroup.add(mesh);
-                
-                loaded++;
+            const isSelected = state.selectedParts.has(i);
+            const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
+            
+            // Try to load part image, fall back to 3D geometry
+            if (part.image) {
+                try {
+                    // Create sprite with part image
+                    const sprite = await loadPartSprite(part.image, textureLoader);
+                    sprite.position.set(x, 30, z);
+                    sprite.scale.set(50, 50, 1);
+                    sprite.userData = { partIndex: i };
+                    
+                    if (!isSelected) {
+                        sprite.material.opacity = 0.4;
+                        sprite.material.transparent = true;
+                    }
+                    
+                    state.partsGroup.add(sprite);
+                    
+                    // Add colored base plate
+                    const baseGeo = new THREE.BoxGeometry(50, 4, 50);
+                    const baseMat = new THREE.MeshPhongMaterial({ 
+                        color: colorHex,
+                        opacity: isSelected ? 1 : 0.4,
+                        transparent: !isSelected
+                    });
+                    const base = new THREE.Mesh(baseGeo, baseMat);
+                    base.position.set(x, 2, z);
+                    state.partsGroup.add(base);
+                    
+                } catch (e) {
+                    // Fall back to 3D geometry
+                    addGeometryPart(i, part, x, z, colorHex, isSelected);
+                }
+            } else {
+                // No image, use 3D geometry
+                addGeometryPart(i, part, x, z, colorHex, isSelected);
+            }
+            
+            loaded++;
+            if (loaded % 5 === 0 || loaded === total) {
                 updateLoadingStatus(`Loading parts: ${loaded}/${total}`);
-                
-            } catch (error) {
-                console.error(`Failed to load part ${part.id}:`, error);
-                // Keep placeholder for failed parts
-                loaded++;
             }
         }
         
         updateLoadingStatus('');
         console.log(`Preview loaded: ${loaded}/${total} parts`);
-        
-        // Final center
         centerOnGroup(state.partsGroup);
+    }
+}
+
+async function loadPartSprite(imageUrl, loader) {
+    return new Promise((resolve, reject) => {
+        // Use a CORS proxy for Rebrickable images
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(imageUrl)}`;
+        
+        loader.load(
+            proxyUrl,
+            (texture) => {
+                const material = new THREE.SpriteMaterial({ 
+                    map: texture,
+                    transparent: true
+                });
+                const sprite = new THREE.Sprite(material);
+                resolve(sprite);
+            },
+            undefined,
+            (error) => {
+                reject(error);
+            }
+        );
+    });
+}
+
+async function addGeometryPart(index, part, x, z, colorHex, isSelected) {
+    try {
+        const geometry = await getPartGeometry(part.id);
+        const material = new THREE.MeshPhongMaterial({ 
+            color: colorHex,
+            opacity: isSelected ? 1 : 0.5,
+            transparent: !isSelected,
+            flatShading: false
+        });
+        
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(x, 0, z);
+        mesh.userData = { partIndex: index };
+        state.partsGroup.add(mesh);
+    } catch (e) {
+        console.warn('Failed to add part', part.id, e);
     }
 }
 
