@@ -42,11 +42,31 @@ async function init() {
     setupInventoryUI();
     updateInventoryDisplay();
     setupPWAInstall();
+    setupHelpModal();
     
     // Preload common parts in background
     preloadCommonParts().then(() => {
         const stats = getCacheStats();
         console.log(`Part cache ready: ${stats.bundled} bundled, ${stats.cached} cached`);
+    });
+}
+
+// Help Modal
+function setupHelpModal() {
+    const modal = document.getElementById('helpModal');
+    const helpBtn = document.getElementById('helpBtn');
+    const closeBtn = document.getElementById('closeHelp');
+    
+    helpBtn.addEventListener('click', () => {
+        modal.style.display = 'flex';
+    });
+    
+    closeBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.style.display = 'none';
     });
 }
 

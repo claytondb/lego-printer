@@ -20,6 +20,7 @@
         <header>
             <h1>🧱 Lego Piece Printer</h1>
             <p>Load a Lego design, select pieces you need, export to STL for 3D printing</p>
+            <button id="helpBtn" class="help-btn">❓ How It Works</button>
             <button id="installBtn" class="install-btn" style="display: none;">
                 📲 Install App
             </button>
@@ -278,6 +279,54 @@
                 
                 <div class="instructions-note">
                     <p>💡 Most LEGO sets from 2005+ have free PDF instructions on LEGO.com</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>❓ How It Works</h2>
+                <button id="closeHelp" class="close-btn">&times;</button>
+            </div>
+            
+            <div class="help-content">
+                <div class="help-step">
+                    <span class="step-num">1</span>
+                    <div>
+                        <strong>Load a LEGO Set</strong>
+                        <p>Search for official sets or upload an LDraw file</p>
+                    </div>
+                </div>
+                
+                <div class="help-step">
+                    <span class="step-num">2</span>
+                    <div>
+                        <strong>Select Pieces You Need</strong>
+                        <p>Mark pieces you already own, select only what you're missing</p>
+                    </div>
+                </div>
+                
+                <div class="help-step">
+                    <span class="step-num">3</span>
+                    <div>
+                        <strong>Compare Prices</strong>
+                        <p>See BrickLink prices vs 3D printing cost estimates</p>
+                    </div>
+                </div>
+                
+                <div class="help-step">
+                    <span class="step-num">4</span>
+                    <div>
+                        <strong>Export STL</strong>
+                        <p>Download STL files to 3D print the parts you need</p>
+                    </div>
+                </div>
+                
+                <div class="help-tip">
+                    💡 <strong>Tip:</strong> Use "📖 Instructions" after loading a set to find official building guides
                 </div>
             </div>
         </div>
