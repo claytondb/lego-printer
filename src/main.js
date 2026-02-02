@@ -1,12 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { LDrawLoader } from 'three/examples/jsm/loaders/LDrawLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { LDRAW_COLORS } from './ldraw-colors.js';
 import { SET_CATALOG } from './set-catalog.js';
-
-// LDraw parts library URL (official mirror)
-const LDRAW_PARTS_URL = 'https://raw.githubusercontent.com/nicoschwabe/ldraw-parts/main/';
+import { getPartGeometry, preloadCommonParts, getCacheStats } from './part-loader.js';
 
 // App State
 const state = {
@@ -17,8 +14,6 @@ const state = {
     camera: null,
     renderer: null,
     controls: null,
-    ldrawLoader: null,
-    loadedGeometries: new Map(),  // partId -> geometry
     builtGroup: null,       // Group for assembled model
     partsGroup: null,       // Group for laid-out parts
     viewMode: 'built',      // 'built' or 'parts'
@@ -35,7 +30,12 @@ async function init() {
     setupModal();
     setupCatalog();
     setupSamples();
-    await initLDrawLoader();
+    
+    // Preload common parts in background
+    preloadCommonParts().then(() => {
+        const stats = getCacheStats();
+        console.log(`Part cache ready: ${stats.bundled} bundled, ${stats.cached} cached`);
+    });
 }
 
 // Sample Designs
@@ -47,17 +47,6 @@ function setupSamples() {
             if (setId) loadCatalogSet(setId);
         });
     });
-}
-
-// LDraw Loader Setup
-async function initLDrawLoader() {
-    state.ldrawLoader = new LDrawLoader();
-    
-    // Set path to parts library
-    state.ldrawLoader.setPartsLibraryPath(LDRAW_PARTS_URL);
-    
-    // Smoother rendering
-    state.ldrawLoader.smoothNormals = true;
 }
 
 // File Upload
@@ -116,7 +105,7 @@ async function loadLDrawModel(ldrContent, filename) {
     showLoading('Parsing LDraw file...');
     
     try {
-        // Parse parts list from content
+        // Parse parts list and instances from content
         const partsData = parseLDrawParts(ldrContent);
         state.parts = partsData.parts;
         state.partInstances = partsData.instances;
@@ -124,34 +113,14 @@ async function loadLDrawModel(ldrContent, filename) {
         // Select all by default
         state.selectedParts = new Set(state.parts.map((_, i) => i));
         
-        showLoading('Loading 3D geometry...');
+        showLoading('Loading part geometry...');
         
-        // Load the actual 3D model using LDrawLoader
-        const group = await new Promise((resolve, reject) => {
-            // Create a blob URL for the LDR content
-            const blob = new Blob([ldrContent], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            
-            state.ldrawLoader.load(
-                url,
-                (loadedGroup) => {
-                    URL.revokeObjectURL(url);
-                    resolve(loadedGroup);
-                },
-                (progress) => {
-                    if (progress.total) {
-                        const pct = Math.round((progress.loaded / progress.total) * 100);
-                        showLoading(`Loading geometry... ${pct}%`);
-                    }
-                },
-                (error) => {
-                    URL.revokeObjectURL(url);
-                    reject(error);
-                }
-            );
-        });
-        
-        state.builtGroup = group;
+        // Build the assembled model from part instances
+        if (state.partInstances.length > 0) {
+            state.builtGroup = await buildAssembledModel(state.partInstances);
+        } else {
+            state.builtGroup = null;
+        }
         
         hideLoading();
         showWorkspace(state.currentModelName);
@@ -161,19 +130,58 @@ async function loadLDrawModel(ldrContent, filename) {
     } catch (error) {
         hideLoading();
         console.error('LDraw load error:', error);
-        
-        // Fallback to basic cube rendering if LDrawLoader fails
-        console.log('Falling back to basic rendering...');
-        const partsData = parseLDrawParts(ldrContent);
-        state.parts = partsData.parts;
-        state.partInstances = partsData.instances;
-        state.selectedParts = new Set(state.parts.map((_, i) => i));
-        state.builtGroup = null;
-        
-        showWorkspace(state.currentModelName);
-        renderPartsList();
-        init3DPreview();
+        alert('Failed to load model: ' + error.message);
     }
+}
+
+// Build 3D assembled model from part instances
+async function buildAssembledModel(instances) {
+    const group = new THREE.Group();
+    
+    // Get unique part IDs
+    const uniqueParts = [...new Set(instances.map(i => i.partId))];
+    showLoading(`Loading ${uniqueParts.length} unique parts...`);
+    
+    // Preload all unique part geometries
+    const geometryMap = new Map();
+    await Promise.all(uniqueParts.map(async (partId) => {
+        const geo = await getPartGeometry(partId);
+        geometryMap.set(partId, geo);
+    }));
+    
+    showLoading('Building model...');
+    
+    // Place each instance
+    for (const inst of instances) {
+        const geo = geometryMap.get(inst.partId);
+        if (!geo) continue;
+        
+        const color = LDRAW_COLORS[inst.color] || { hex: '#888888' };
+        const material = new THREE.MeshPhongMaterial({ 
+            color: color.hex,
+            flatShading: false
+        });
+        
+        const mesh = new THREE.Mesh(geo.clone(), material);
+        
+        // Apply LDraw transformation matrix
+        if (inst.matrix) {
+            const m = new THREE.Matrix4();
+            m.set(
+                inst.matrix[0], inst.matrix[4], inst.matrix[8], inst.matrix[12],
+                -inst.matrix[1], -inst.matrix[5], -inst.matrix[9], -inst.matrix[13], // Flip Y
+                inst.matrix[2], inst.matrix[6], inst.matrix[10], inst.matrix[14],
+                0, 0, 0, 1
+            );
+            mesh.applyMatrix4(m);
+        } else {
+            mesh.position.set(inst.x, -inst.y, inst.z);
+        }
+        
+        group.add(mesh);
+    }
+    
+    return group;
 }
 
 // Parse LDraw content for parts list
@@ -209,7 +217,19 @@ function parseLDrawParts(content) {
                 const x = parseFloat(parts[2]);
                 const y = parseFloat(parts[3]);
                 const z = parseFloat(parts[4]);
+                // Transformation matrix (a b c d e f g h i)
+                const a = parseFloat(parts[5]), b = parseFloat(parts[6]), c = parseFloat(parts[7]);
+                const d = parseFloat(parts[8]), e = parseFloat(parts[9]), f = parseFloat(parts[10]);
+                const g = parseFloat(parts[11]), h = parseFloat(parts[12]), i = parseFloat(parts[13]);
                 const partFile = parts.slice(14).join(' ').toLowerCase();
+                
+                // Build 4x4 transformation matrix (column-major for Three.js)
+                const matrix = [
+                    a, d, g, 0,
+                    b, e, h, 0,
+                    c, f, i, 0,
+                    x, y, z, 1
+                ];
                 
                 // Check if it's a submodel reference
                 if (submodels.has(partFile)) {
@@ -217,7 +237,7 @@ function parseLDrawParts(content) {
                 } else {
                     const partId = extractPartId(partFile);
                     if (partId) {
-                        instances.push({ partId, color, x, y, z, partFile });
+                        instances.push({ partId, color, x, y, z, matrix, partFile });
                         
                         const key = `${partId}|${color}`;
                         if (!partCounts.has(key)) {
@@ -630,7 +650,7 @@ function init3DPreview() {
     });
 }
 
-function updatePreview() {
+async function updatePreview() {
     if (!state.scene) return;
     
     // Remove existing model groups
@@ -661,12 +681,15 @@ function updatePreview() {
         const cols = Math.ceil(Math.sqrt(state.parts.length));
         const spacing = 50;
         
+        // Load all part geometries in parallel
+        const geometryPromises = state.parts.map(part => getPartGeometry(part.id));
+        const geometries = await Promise.all(geometryPromises);
+        
         state.parts.forEach((part, index) => {
             const isSelected = state.selectedParts.has(index);
             const color = LDRAW_COLORS[part.color] || { hex: '#888888' };
             
-            // Create brick geometry based on part type
-            const geometry = createBrickGeometry(part.id);
+            const geometry = geometries[index];
             const material = new THREE.MeshPhongMaterial({ 
                 color: color.hex,
                 opacity: isSelected ? 1 : 0.3,
@@ -686,132 +709,11 @@ function updatePreview() {
         
         // Center view on parts grid
         state.controls.target.set(0, 0, 0);
+        
+        // Show cache stats
+        const stats = getCacheStats();
+        console.log(`Preview loaded: ${state.parts.length} parts (${stats.cached} cached)`);
     }
-}
-
-// Create approximate brick geometry based on part ID
-function createBrickGeometry(partId) {
-    // Parse common brick dimensions from ID
-    const id = partId.toLowerCase();
-    
-    // Unit sizes (LDraw units)
-    const STUD = 20;  // 1 stud = 20 LDU
-    const PLATE_HEIGHT = 8;
-    const BRICK_HEIGHT = 24;
-    
-    // Default 1x1 brick
-    let width = STUD;
-    let height = BRICK_HEIGHT;
-    let depth = STUD;
-    
-    // Plates (3020-3024, etc)
-    if (id.startsWith('302') || id.match(/plate/i)) {
-        height = PLATE_HEIGHT;
-        const dims = parseDimensions(id);
-        width = dims.x * STUD;
-        depth = dims.z * STUD;
-    }
-    // Standard bricks (3001-3010, etc)
-    else if (id.startsWith('300') || id.startsWith('301') || id.match(/brick/i)) {
-        const dims = parseDimensions(id);
-        width = dims.x * STUD;
-        depth = dims.z * STUD;
-    }
-    // Slopes
-    else if (id.startsWith('303') || id.startsWith('304') || id.match(/slope/i)) {
-        const dims = parseDimensions(id);
-        width = dims.x * STUD;
-        depth = dims.z * STUD;
-    }
-    // Tiles
-    else if (id.match(/tile/i) || id.startsWith('306') || id.startsWith('307')) {
-        height = 4;
-        const dims = parseDimensions(id);
-        width = dims.x * STUD;
-        depth = dims.z * STUD;
-    }
-    
-    // Add studs on top
-    const group = new THREE.Group();
-    
-    // Main body
-    const bodyGeometry = new THREE.BoxGeometry(width * 0.95, height, depth * 0.95);
-    const body = new THREE.Mesh(bodyGeometry);
-    body.position.y = height / 2;
-    group.add(body);
-    
-    // Studs
-    const studGeometry = new THREE.CylinderGeometry(6, 6, 4, 16);
-    const studsX = Math.round(width / STUD);
-    const studsZ = Math.round(depth / STUD);
-    
-    for (let sx = 0; sx < studsX; sx++) {
-        for (let sz = 0; sz < studsZ; sz++) {
-            const stud = new THREE.Mesh(studGeometry);
-            stud.position.set(
-                (sx - (studsX - 1) / 2) * STUD,
-                height + 2,
-                (sz - (studsZ - 1) / 2) * STUD
-            );
-            group.add(stud);
-        }
-    }
-    
-    // Merge into single geometry
-    const geometries = [];
-    group.traverse(child => {
-        if (child.geometry) {
-            const geo = child.geometry.clone();
-            geo.translate(child.position.x, child.position.y, child.position.z);
-            geometries.push(geo);
-        }
-    });
-    
-    return mergeGeometries(geometries);
-}
-
-function parseDimensions(partId) {
-    // Try to extract dimensions from part ID
-    // Common patterns: 3001 = 2x4, 3003 = 2x2, 3004 = 1x2, etc.
-    const knownDims = {
-        '3001': { x: 2, z: 4 },
-        '3002': { x: 2, z: 3 },
-        '3003': { x: 2, z: 2 },
-        '3004': { x: 1, z: 2 },
-        '3005': { x: 1, z: 1 },
-        '3006': { x: 2, z: 10 },
-        '3007': { x: 2, z: 8 },
-        '3008': { x: 1, z: 8 },
-        '3009': { x: 1, z: 6 },
-        '3010': { x: 1, z: 4 },
-        '3020': { x: 2, z: 4 },
-        '3021': { x: 2, z: 3 },
-        '3022': { x: 2, z: 2 },
-        '3023': { x: 1, z: 2 },
-        '3024': { x: 1, z: 1 },
-        '3034': { x: 2, z: 8 },
-        '3795': { x: 2, z: 6 },
-        '3710': { x: 1, z: 4 },
-        '3666': { x: 1, z: 6 },
-        '3460': { x: 1, z: 8 },
-        '3622': { x: 1, z: 3 },
-        '3030': { x: 4, z: 10 },
-        '3031': { x: 4, z: 4 },
-        '3032': { x: 4, z: 6 },
-        '3033': { x: 6, z: 10 },
-        '3035': { x: 4, z: 8 },
-        '3036': { x: 6, z: 8 }
-    };
-    
-    if (knownDims[partId]) return knownDims[partId];
-    
-    // Try to parse from ID pattern
-    const match = partId.match(/(\d)x(\d+)/i);
-    if (match) {
-        return { x: parseInt(match[1]), z: parseInt(match[2]) };
-    }
-    
-    return { x: 1, z: 1 };
 }
 
 function resetCameraView() {
@@ -850,36 +752,42 @@ async function performExport() {
     showLoading('Generating STL...');
     
     try {
-        // Create geometry for all selected parts
+        const selectedIndices = Array.from(state.selectedParts);
+        
+        if (selectedIndices.length === 0) {
+            hideLoading();
+            alert('No parts selected!');
+            return;
+        }
+        
+        // Load all geometries in parallel
+        showLoading(`Loading ${selectedIndices.length} parts...`);
+        const selectedParts = selectedIndices.map(i => state.parts[i]);
+        const loadedGeometries = await Promise.all(
+            selectedParts.map(part => getPartGeometry(part.id))
+        );
+        
+        showLoading('Building STL...');
+        
+        // Position and scale geometries
         const geometries = [];
         const spacing = 50;
-        const cols = Math.ceil(Math.sqrt(state.selectedParts.size));
+        const cols = Math.ceil(Math.sqrt(selectedIndices.length));
         
-        let index = 0;
-        for (const partIndex of state.selectedParts) {
-            const part = state.parts[partIndex];
-            const geo = createBrickGeometry(part.id);
-            
-            // Position in grid
+        loadedGeometries.forEach((geo, index) => {
+            const clonedGeo = geo.clone();
             const row = Math.floor(index / cols);
             const col = index % cols;
             
-            geo.translate(
+            clonedGeo.translate(
                 col * spacing * scale,
                 0,
                 row * spacing * scale
             );
             
-            geo.scale(scale, scale, scale);
-            geometries.push(geo);
-            index++;
-        }
-        
-        if (geometries.length === 0) {
-            hideLoading();
-            alert('No parts selected!');
-            return;
-        }
+            clonedGeo.scale(scale, scale, scale);
+            geometries.push(clonedGeo);
+        });
         
         const mergedGeometry = mergeGeometries(geometries);
         const stlData = exportToSTL(mergedGeometry);
