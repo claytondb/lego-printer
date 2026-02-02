@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-// Cache for loaded parts
+// Cache for loaded parts and subparts
 const partCache = new Map();
+const subpartCache = new Map();
 const loadingParts = new Map(); // Track in-progress loads
 
 // LDraw parts library URL
@@ -78,9 +79,9 @@ async function loadPartGeometry(partId) {
  * Parse LDraw .dat file content into geometry
  */
 async function parseLDrawPart(content, partId, depth = 0) {
-    if (depth > 5) {
+    if (depth > 10) {
         // Prevent infinite recursion
-        return createFallbackBox(partId);
+        return null;
     }
     
     const lines = content.split('\n');
@@ -121,18 +122,14 @@ async function parseLDrawPart(content, partId, depth = 0) {
             // Subpart reference: 1 color x y z a b c d e f g h i file.dat
             const subpartFile = parts[14].toLowerCase().replace(/\\/g, '/');
             
-            // Skip complex subparts for now, just get primitives
-            if (subpartFile.includes('stud') || subpartFile.startsWith('s/') || 
-                subpartFile.includes('box') || subpartFile.includes('rect')) {
-                // Try to load this subpart
-                try {
-                    const subGeo = await loadSubpart(subpartFile, parts, depth);
-                    if (subGeo) {
-                        subpartGeometries.push(subGeo);
-                    }
-                } catch (e) {
-                    // Skip failed subparts
+            // Load ALL subparts (not just specific ones)
+            try {
+                const subGeo = await loadSubpart(subpartFile, parts, depth);
+                if (subGeo) {
+                    subpartGeometries.push(subGeo);
                 }
+            } catch (e) {
+                // Skip failed subparts silently
             }
         }
     }
@@ -177,23 +174,50 @@ async function loadSubpart(filename, parts, depth) {
     const d = parseFloat(parts[8]), e = parseFloat(parts[9]), f = parseFloat(parts[10]);
     const g = parseFloat(parts[11]), h = parseFloat(parts[12]), i = parseFloat(parts[13]);
     
-    // Build transformation matrix
+    // Build transformation matrix (LDraw uses right-handed, Y-up)
     const matrix = new THREE.Matrix4();
     matrix.set(
-        a, -b, c, x,
-        -d, e, -f, y,
-        g, -h, i, z,
+        a, b, c, x,
+        d, e, f, y,
+        g, h, i, z,
         0, 0, 0, 1
     );
     
-    // Fetch subpart
-    const cleanName = filename.replace('.dat', '').replace(/^(s\/|p\/|parts\/)/, '');
+    // Fetch subpart - handle various path formats
+    let cleanName = filename.replace('.dat', '');
     
-    const urls = [
-        `${LDRAW_URL}p/${cleanName}.dat`,
-        `${LDRAW_URL}parts/s/${cleanName}.dat`,
-        `${LDRAW_URL}parts/${cleanName}.dat`
-    ];
+    // Build list of possible URLs based on the filename pattern
+    const urls = [];
+    
+    if (cleanName.startsWith('s/')) {
+        // Subpart in parts/s/ folder
+        urls.push(`${LDRAW_URL}parts/${cleanName}.dat`);
+    } else if (cleanName.startsWith('48/')) {
+        // High-res primitive
+        urls.push(`${LDRAW_URL}p/${cleanName}.dat`);
+    } else if (cleanName.startsWith('8/')) {
+        // Low-res primitive  
+        urls.push(`${LDRAW_URL}p/${cleanName}.dat`);
+    } else {
+        // Try multiple locations
+        urls.push(
+            `${LDRAW_URL}p/${cleanName}.dat`,
+            `${LDRAW_URL}parts/s/${cleanName}.dat`,
+            `${LDRAW_URL}parts/${cleanName}.dat`,
+            `${LDRAW_URL}p/48/${cleanName}.dat`
+        );
+    }
+    
+    // Check subpart cache first
+    if (subpartCache.has(cleanName)) {
+        const cached = subpartCache.get(cleanName);
+        if (cached) {
+            const geo = cached.clone();
+            geo.applyMatrix4(matrix);
+            return geo;
+        }
+        return null;
+    }
     
     for (const url of urls) {
         try {
@@ -202,8 +226,12 @@ async function loadSubpart(filename, parts, depth) {
                 const content = await response.text();
                 const geo = await parseLDrawPart(content, cleanName, depth + 1);
                 if (geo) {
-                    geo.applyMatrix4(matrix);
-                    return geo;
+                    // Cache the untransformed geometry
+                    subpartCache.set(cleanName, geo);
+                    // Return transformed clone
+                    const transformed = geo.clone();
+                    transformed.applyMatrix4(matrix);
+                    return transformed;
                 }
             }
         } catch (e) {
@@ -211,6 +239,8 @@ async function loadSubpart(filename, parts, depth) {
         }
     }
     
+    // Cache null result to avoid retrying
+    subpartCache.set(cleanName, null);
     return null;
 }
 
