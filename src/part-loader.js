@@ -22,9 +22,9 @@ async function initLoader() {
     loader = new LDrawLoader();
     loader.setPartsLibraryPath(LDRAW_URL);
     
-    // Preload materials/colors
+    // Preload materials/colors (use the alt config from the repo)
     try {
-        await loader.preloadMaterials(`${LDRAW_URL}LDConfig.ldr`);
+        await loader.preloadMaterials('https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/colors/ldcfgalt.ldr');
         console.log('LDraw materials loaded');
     } catch (e) {
         console.warn('Failed to load LDraw materials, using defaults:', e.message);
@@ -89,31 +89,46 @@ async function loadPart(partId) {
     
     for (const path of paths) {
         try {
+            console.log(`Trying to load: ${path}`);
             const group = await loadFromUrl(path);
             if (group) {
+                console.log(`Loaded ${partId}, extracting geometry...`);
                 const geometry = extractGeometryFromGroup(group);
                 if (geometry) {
+                    console.log(`Got geometry for ${partId}`);
                     return geometry;
                 }
             }
         } catch (e) {
+            console.log(`Failed to load from ${path}:`, e.message);
             // Try next path
         }
     }
     
-    throw new Error(`Part not found: ${partId}`);
+    console.warn(`Part not found in any path: ${partId}`);
+    return null; // Return null instead of throwing - will use fallback
 }
 
 /**
- * Load model from URL using LDrawLoader
+ * Load model from URL using LDrawLoader with timeout
  */
 function loadFromUrl(url) {
     return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error('Load timeout'));
+        }, 10000); // 10 second timeout
+        
         loader.load(
             url,
-            (group) => resolve(group),
+            (group) => {
+                clearTimeout(timeoutId);
+                resolve(group);
+            },
             undefined,
-            (error) => reject(error)
+            (error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            }
         );
     });
 }
