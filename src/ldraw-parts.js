@@ -1,0 +1,161 @@
+/**
+ * Common LDraw part names database
+ * This is a subset - full library has 10,000+ parts
+ */
+export const LDRAW_PARTS = {
+    // Basic Bricks
+    '3001': { name: 'Brick 2x4', category: 'Brick' },
+    '3002': { name: 'Brick 2x3', category: 'Brick' },
+    '3003': { name: 'Brick 2x2', category: 'Brick' },
+    '3004': { name: 'Brick 1x2', category: 'Brick' },
+    '3005': { name: 'Brick 1x1', category: 'Brick' },
+    '3006': { name: 'Brick 2x10', category: 'Brick' },
+    '3007': { name: 'Brick 2x8', category: 'Brick' },
+    '3008': { name: 'Brick 1x8', category: 'Brick' },
+    '3009': { name: 'Brick 1x6', category: 'Brick' },
+    '3010': { name: 'Brick 1x4', category: 'Brick' },
+    '3062': { name: 'Brick 1x1 Round', category: 'Brick' },
+    '3622': { name: 'Brick 1x3', category: 'Brick' },
+    '3755': { name: 'Brick 1x3x2', category: 'Brick' },
+    '2357': { name: 'Brick 2x2 Corner', category: 'Brick' },
+    '87087': { name: 'Brick 1x1 Stud on Side', category: 'Brick' },
+    '4070': { name: 'Brick 1x1 Headlight', category: 'Brick' },
+    
+    // Plates
+    '3020': { name: 'Plate 2x4', category: 'Plate' },
+    '3021': { name: 'Plate 2x3', category: 'Plate' },
+    '3022': { name: 'Plate 2x2', category: 'Plate' },
+    '3023': { name: 'Plate 1x2', category: 'Plate' },
+    '3024': { name: 'Plate 1x1', category: 'Plate' },
+    '3026': { name: 'Plate 2x12', category: 'Plate' },
+    '3028': { name: 'Plate 6x12', category: 'Plate' },
+    '3029': { name: 'Plate 4x12', category: 'Plate' },
+    '3030': { name: 'Plate 4x10', category: 'Plate' },
+    '3031': { name: 'Plate 4x4', category: 'Plate' },
+    '3032': { name: 'Plate 4x6', category: 'Plate' },
+    '3033': { name: 'Plate 6x10', category: 'Plate' },
+    '3034': { name: 'Plate 2x8', category: 'Plate' },
+    '3035': { name: 'Plate 4x8', category: 'Plate' },
+    '3036': { name: 'Plate 6x8', category: 'Plate' },
+    '3460': { name: 'Plate 1x8', category: 'Plate' },
+    '3666': { name: 'Plate 1x6', category: 'Plate' },
+    '3710': { name: 'Plate 1x4', category: 'Plate' },
+    '3795': { name: 'Plate 2x6', category: 'Plate' },
+    '4477': { name: 'Plate 1x10', category: 'Plate' },
+    '6636': { name: 'Plate 1x6', category: 'Plate' },
+    '60479': { name: 'Plate 1x12', category: 'Plate' },
+    '4032': { name: 'Plate 2x2 Round', category: 'Plate' },
+    '85861': { name: 'Plate 1x1 Round', category: 'Plate' },
+    
+    // Tiles
+    '3068': { name: 'Tile 2x2', category: 'Tile' },
+    '3069': { name: 'Tile 1x2', category: 'Tile' },
+    '3070': { name: 'Tile 1x1', category: 'Tile' },
+    '2431': { name: 'Tile 1x4', category: 'Tile' },
+    '6636': { name: 'Tile 1x6', category: 'Tile' },
+    '4150': { name: 'Tile 2x2 Round', category: 'Tile' },
+    '98138': { name: 'Tile 1x1 Round', category: 'Tile' },
+    
+    // Slopes
+    '3037': { name: 'Slope 45 2x4', category: 'Slope' },
+    '3038': { name: 'Slope 45 2x3', category: 'Slope' },
+    '3039': { name: 'Slope 45 2x2', category: 'Slope' },
+    '3040': { name: 'Slope 45 1x2', category: 'Slope' },
+    '3044': { name: 'Slope 45 2x1', category: 'Slope' },
+    '3045': { name: 'Slope 45 2x2 Double', category: 'Slope' },
+    '3048': { name: 'Slope 45 1x2 Triple', category: 'Slope' },
+    '3049': { name: 'Slope 45 2x1 Double', category: 'Slope' },
+    '3298': { name: 'Slope 33 3x2', category: 'Slope' },
+    '3299': { name: 'Slope 33 2x1', category: 'Slope' },
+    '3300': { name: 'Slope 33 2x1 Double', category: 'Slope' },
+    '3665': { name: 'Slope 45 2x1 Inverted', category: 'Slope' },
+    '3676': { name: 'Slope 45 2x2 Inverted Double', category: 'Slope' },
+    '3747': { name: 'Slope 45 2x4 Inverted', category: 'Slope' },
+    '4286': { name: 'Slope 33 3x1', category: 'Slope' },
+    '4287': { name: 'Slope 33 3x1 Inverted', category: 'Slope' },
+    '4460': { name: 'Slope 75 2x1x3', category: 'Slope' },
+    '4861': { name: 'Slope 45 3x2 Inverted Double', category: 'Slope' },
+    '85984': { name: 'Slope 30 1x2x2/3', category: 'Slope' },
+    
+    // Technic
+    '32316': { name: 'Technic Liftarm 1x5', category: 'Technic' },
+    '32524': { name: 'Technic Liftarm 1x7', category: 'Technic' },
+    '40490': { name: 'Technic Liftarm 1x9', category: 'Technic' },
+    '3700': { name: 'Technic Brick 1x2 with Hole', category: 'Technic' },
+    '3701': { name: 'Technic Brick 1x4 with Holes', category: 'Technic' },
+    '3702': { name: 'Technic Brick 1x8 with Holes', category: 'Technic' },
+    '3703': { name: 'Technic Brick 1x16 with Holes', category: 'Technic' },
+    '32064': { name: 'Technic Brick 1x2 with Axle Hole', category: 'Technic' },
+    '6536': { name: 'Technic Axle Joiner Perpendicular', category: 'Technic' },
+    '32013': { name: 'Technic Angle Connector #1', category: 'Technic' },
+    '32014': { name: 'Technic Angle Connector #6', category: 'Technic' },
+    '32034': { name: 'Technic Angle Connector #2', category: 'Technic' },
+    '32192': { name: 'Technic Angle Connector #4', category: 'Technic' },
+    '4519': { name: 'Technic Axle 3', category: 'Technic' },
+    '3705': { name: 'Technic Axle 4', category: 'Technic' },
+    '32073': { name: 'Technic Axle 5', category: 'Technic' },
+    '3706': { name: 'Technic Axle 6', category: 'Technic' },
+    '3707': { name: 'Technic Axle 8', category: 'Technic' },
+    '3737': { name: 'Technic Axle 10', category: 'Technic' },
+    '3708': { name: 'Technic Axle 12', category: 'Technic' },
+    '4186': { name: 'Technic Friction Pin', category: 'Technic' },
+    '32054': { name: 'Technic Pin Long', category: 'Technic' },
+    '32002': { name: 'Technic Pin 3/4', category: 'Technic' },
+    '2780': { name: 'Technic Pin with Friction', category: 'Technic' },
+    '3749': { name: 'Technic Axle Pin', category: 'Technic' },
+    
+    // Wheels and Tires
+    '4624': { name: 'Wheel Rim 8x6.4', category: 'Wheel' },
+    '55982': { name: 'Wheel Rim 11x6', category: 'Wheel' },
+    '56145': { name: 'Wheel Rim 14x6', category: 'Wheel' },
+    '30285': { name: 'Wheel Rim 8x8', category: 'Wheel' },
+    '3641': { name: 'Tire 8x6.4', category: 'Tire' },
+    '55981': { name: 'Tire 11x6', category: 'Tire' },
+    '59895': { name: 'Tire 14x6', category: 'Tire' },
+    
+    // Windows and Doors
+    '60601': { name: 'Window 1x2x2', category: 'Window' },
+    '60592': { name: 'Window 1x2x3', category: 'Window' },
+    '60594': { name: 'Window 1x4x3', category: 'Window' },
+    '3854': { name: 'Window 1x2x2 Glass', category: 'Window' },
+    '3823': { name: 'Windscreen 2x4x2', category: 'Window' },
+    '60596': { name: 'Door 1x4x6', category: 'Door' },
+    '60616': { name: 'Door 1x4x6 Glass', category: 'Door' },
+    
+    // Minifig Parts
+    '3626': { name: 'Minifig Head', category: 'Minifig' },
+    '973': { name: 'Minifig Torso', category: 'Minifig' },
+    '3815': { name: 'Minifig Hips', category: 'Minifig' },
+    '970': { name: 'Minifig Leg', category: 'Minifig' },
+    '3819': { name: 'Minifig Arm', category: 'Minifig' },
+    '3820': { name: 'Minifig Hand', category: 'Minifig' },
+    
+    // Special
+    '4589': { name: 'Cone 1x1', category: 'Special' },
+    '4073': { name: 'Plate 1x1 Round', category: 'Plate' },
+    '3062b': { name: 'Brick 1x1 Round Open Stud', category: 'Brick' },
+    '6141': { name: 'Plate 1x1 Round', category: 'Plate' },
+    '6143': { name: 'Brick 2x2 Round', category: 'Brick' },
+    '3941': { name: 'Brick 2x2 Round', category: 'Brick' },
+    '3942': { name: 'Cone 2x2x2', category: 'Special' },
+    '4740': { name: 'Dish 2x2', category: 'Special' },
+    '2654': { name: 'Dish 2x2', category: 'Special' },
+    '6019': { name: 'Plate 1x1 with Clip Horizontal', category: 'Plate' },
+    '4085': { name: 'Plate 1x1 with Clip Vertical', category: 'Plate' },
+    '60470': { name: 'Plate 1x2 with Handle', category: 'Plate' },
+    '2540': { name: 'Plate 1x2 with Handle', category: 'Plate' },
+    '48336': { name: 'Plate 1x2 with Clip Horizontal', category: 'Plate' },
+    '63868': { name: 'Plate 1x2 with Clip Horizontal', category: 'Plate' },
+    '60478': { name: 'Plate 1x2 with Handle', category: 'Plate' },
+    '30503': { name: 'Plate 1x1 with Clip Light', category: 'Plate' },
+    '4623': { name: 'Plate 1x2 with Bar Handle', category: 'Plate' },
+    '92280': { name: 'Plate 1x2 with Handle', category: 'Plate' },
+};
+
+// Additional part data can be loaded from LDraw library files
+export function loadPartLibrary(ldrawPath) {
+    // This would load the full LDraw parts.lst and parse part names
+    // For a complete implementation, we'd fetch from:
+    // https://library.ldraw.org/library/updates/complete.zip
+    console.log('Loading LDraw library from:', ldrawPath);
+}

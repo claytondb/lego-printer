@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lego Piece Printer</title>
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>🧱 Lego Piece Printer</h1>
+            <p>Load a Lego design, select the pieces you need, export to STL</p>
+        </header>
+
+        <main>
+            <section class="upload-section">
+                <div class="upload-zone" id="uploadZone">
+                    <input type="file" id="fileInput" accept=".ldr,.mpd,.dat,.io,.lxf" hidden>
+                    <div class="upload-content">
+                        <span class="upload-icon">📁</span>
+                        <p>Drop LDraw file here or click to browse</p>
+                        <p class="upload-hint">Supports: .ldr, .mpd, .dat (LDraw), .io (Studio 2.0)</p>
+                    </div>
+                </div>
+                <div class="sample-designs">
+                    <p>Or try a sample:</p>
+                    <button class="sample-btn" data-sample="car">🚗 Simple Car</button>
+                    <button class="sample-btn" data-sample="house">🏠 Mini House</button>
+                    <button class="sample-btn" data-sample="robot">🤖 Robot</button>
+                </div>
+            </section>
+
+            <section class="workspace" id="workspace" style="display: none;">
+                <div class="workspace-header">
+                    <h2 id="designName">Design Name</h2>
+                    <div class="workspace-actions">
+                        <button id="selectAll" class="btn">Select All</button>
+                        <button id="selectNone" class="btn">Select None</button>
+                        <button id="exportSTL" class="btn btn-primary">Export STL</button>
+                    </div>
+                </div>
+
+                <div class="workspace-content">
+                    <div class="preview-panel">
+                        <div id="preview3d" class="preview-3d"></div>
+                        <div class="preview-controls">
+                            <button id="resetView" class="btn-small">Reset View</button>
+                            <label><input type="checkbox" id="showSelected" checked> Show only selected</label>
+                        </div>
+                    </div>
+
+                    <div class="parts-panel">
+                        <div class="parts-header">
+                            <h3>Parts List</h3>
+                            <div class="parts-summary">
+                                <span id="selectedCount">0</span> / <span id="totalCount">0</span> selected
+                                (<span id="selectedPieces">0</span> pieces)
+                            </div>
+                        </div>
+                        <div class="parts-filters">
+                            <input type="text" id="searchParts" placeholder="Search parts...">
+                            <select id="sortParts">
+                                <option value="quantity">Sort by Quantity</option>
+                                <option value="name">Sort by Name</option>
+                                <option value="color">Sort by Color</option>
+                            </select>
+                        </div>
+                        <div class="parts-list" id="partsList"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <div class="modal" id="exportModal" style="display: none;">
+            <div class="modal-content">
+                <h3>Export Settings</h3>
+                <div class="export-options">
+                    <label>
+                        Scale:
+                        <select id="exportScale">
+                            <option value="1">1:1 (Real Lego size)</option>
+                            <option value="2">2x Scale</option>
+                            <option value="0.5">0.5x Scale</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="combineParts"> Combine into single STL
+                    </label>
+                    <label>
+                        <input type="checkbox" id="hollowParts" checked> Hollow parts (save material)
+                    </label>
+                </div>
+                <div class="export-preview">
+                    <p>Exporting <span id="exportCount">0</span> unique parts (<span id="exportPieces">0</span> total pieces)</p>
+                </div>
+                <div class="modal-actions">
+                    <button id="cancelExport" class="btn">Cancel</button>
+                    <button id="confirmExport" class="btn btn-primary">Download STL</button>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Uses <a href="https://www.ldraw.org/" target="_blank">LDraw</a> parts library</p>
+        </footer>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
