@@ -1118,7 +1118,10 @@ function init3DPreview() {
     state.scene.add(backLight);
     
     // Grid
-    const gridHelper = new THREE.GridHelper(500, 50, 0x444444, 0x333333);
+    // Large grid that appears infinite
+    const gridHelper = new THREE.GridHelper(10000, 500, 0x444444, 0x333333);
+    gridHelper.material.transparent = true;
+    gridHelper.material.opacity = 0.5;
     state.scene.add(gridHelper);
     
     updatePreview().catch(err => console.error('Preview update failed:', err));
@@ -1162,7 +1165,7 @@ async function updatePreview() {
         state.controls.update();
         
     } else {
-        // Show parts laid out with images or 3D geometry
+        // Show parts laid out with instances based on quantity
         state.partsGroup = new THREE.Group();
         state.scene.add(state.partsGroup);
         
@@ -1171,36 +1174,73 @@ async function updatePreview() {
             return;
         }
         
-        const cols = Math.ceil(Math.sqrt(state.parts.length));
-        const spacing = 80;
-        const textureLoader = new THREE.TextureLoader();
-        textureLoader.crossOrigin = 'anonymous';
-        
-        let loaded = 0;
-        const total = state.parts.length;
-        updateLoadingStatus(`Loading parts: 0/${total}`);
-        
+        // Build list of all instances (part + quantity)
+        const instances = [];
         for (let i = 0; i < state.parts.length; i++) {
             const part = state.parts[i];
+            const qty = part.quantity || 1;
+            for (let q = 0; q < qty; q++) {
+                instances.push({ partIndex: i, part, instanceNum: q });
+            }
+        }
+        
+        const totalInstances = instances.length;
+        const cols = Math.ceil(Math.sqrt(totalInstances));
+        const spacing = 60; // Tighter spacing for more parts
+        
+        let loaded = 0;
+        updateLoadingStatus(`Loading parts: 0/${totalInstances}`);
+        
+        // Cache geometries to avoid reloading same part
+        const geometryCache = new Map();
+        
+        for (let i = 0; i < instances.length; i++) {
+            const { partIndex, part } = instances[i];
             const row = Math.floor(i / cols);
             const col = i % cols;
             const x = col * spacing - (cols * spacing / 2);
-            const z = row * spacing - (Math.ceil(state.parts.length / cols) * spacing / 2);
+            const z = row * spacing - (Math.ceil(totalInstances / cols) * spacing / 2);
             
-            const isSelected = state.selectedParts.has(i);
+            const isSelected = state.selectedParts.has(partIndex);
             const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
             
-            // Always use 3D geometry - sprites are unreliable due to CORS
-            await addGeometryPart(i, part, x, z, colorHex, isSelected);
+            // Load geometry (use cache if already loaded)
+            let geometry = geometryCache.get(part.id);
+            if (!geometry) {
+                try {
+                    geometry = await getPartGeometry(part.id);
+                    geometryCache.set(part.id, geometry);
+                } catch (e) {
+                    console.warn('Failed to get geometry for', part.id, e);
+                }
+            }
+            
+            // Create mesh
+            if (!geometry) {
+                geometry = new THREE.BoxGeometry(40, 24, 40);
+                geometry.translate(0, 12, 0);
+            }
+            
+            const material = new THREE.MeshPhongMaterial({ 
+                color: colorHex,
+                opacity: isSelected ? 1 : 0.3,
+                transparent: !isSelected,
+                flatShading: false
+            });
+            
+            const mesh = new THREE.Mesh(geometry.clone(), material);
+            mesh.position.set(x, 0, z);
+            mesh.userData = { partIndex };
+            state.partsGroup.add(mesh);
             
             loaded++;
-            if (loaded % 5 === 0 || loaded === total) {
-                updateLoadingStatus(`Loading parts: ${loaded}/${total}`);
+            if (loaded % 10 === 0 || loaded === totalInstances) {
+                updateLoadingStatus(`Loading parts: ${loaded}/${totalInstances}`);
             }
         }
         
         updateLoadingStatus('');
-        console.log(`Preview loaded: ${loaded}/${total} parts`);
+        console.log(`Preview loaded: ${loaded}/${totalInstances} instances from ${state.parts.length} unique parts`);
         centerOnGroup(state.partsGroup);
     }
 }
