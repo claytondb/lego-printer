@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LDrawLoader } from 'three/examples/jsm/loaders/LDrawLoader.js';
+import { LDrawConditionalLineMaterial } from 'three/examples/jsm/materials/LDrawConditionalLineMaterial.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Cache for loaded parts
@@ -21,6 +22,9 @@ async function initLoader() {
     
     loader = new LDrawLoader();
     loader.setPartsLibraryPath(LDRAW_URL);
+    
+    // Set the conditional line material (required by LDrawLoader)
+    loader.setConditionalLineMaterial(LDrawConditionalLineMaterial);
     
     // Preload materials/colors (use the alt config from the repo)
     try {
