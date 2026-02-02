@@ -22,6 +22,7 @@ const state = {
     viewMode: 'built',      // 'built' or 'parts'
     currentModelName: '',
     currentSetNum: '',      // Current set number (e.g. "75192-1")
+    currentSetImage: '',    // Set image URL from Rebrickable
     rawLdrContent: null,    // Store raw LDR for parsing
     colorFilter: '',        // Current color filter
     searchPage: 1,          // Rebrickable search page
@@ -348,6 +349,7 @@ async function loadRebrickableSet(setNum) {
         
         state.currentModelName = setDetails.name;
         state.currentSetNum = setNum;
+        state.currentSetImage = setDetails.image || '';
         state.parts = parts.filter(p => !p.isSpare).map(p => ({
             id: p.id,
             name: p.name,
@@ -871,7 +873,21 @@ function setViewMode(mode) {
     state.viewMode = mode;
     document.getElementById('viewBuilt').classList.toggle('active', mode === 'built');
     document.getElementById('viewParts').classList.toggle('active', mode === 'parts');
-    updatePreview();
+    
+    // Toggle between image (built) and 3D (parts)
+    const preview3d = document.getElementById('preview3d');
+    const previewImage = document.getElementById('previewImage');
+    const setImage = document.getElementById('setImage');
+    
+    if (mode === 'built' && state.currentSetImage) {
+        preview3d.style.display = 'none';
+        previewImage.style.display = 'flex';
+        setImage.src = state.currentSetImage;
+    } else {
+        preview3d.style.display = 'block';
+        previewImage.style.display = 'none';
+        updatePreview();
+    }
 }
 
 function showWorkspace(name) {
@@ -1530,10 +1546,15 @@ async function performExport() {
             
             for (let i = 0; i < selectedParts.length; i++) {
                 const part = selectedParts[i];
-                const geo = loadedGeometries[i].clone();
-                geo.scale(scale, scale, scale);
+                const geo = loadedGeometries[i];
+                if (!geo) {
+                    console.warn('No geometry for part', part.id);
+                    continue;
+                }
+                const scaledGeo = geo.clone();
+                scaledGeo.scale(scale, scale, scale);
                 
-                const stlData = exportToSTL(geo);
+                const stlData = exportToSTL(scaledGeo);
                 const filename = `${part.id}_${part.colorName.replace(/\s+/g, '-')}_x${part.quantity}.stl`;
                 folder.file(filename, stlData);
                 
@@ -1562,6 +1583,10 @@ async function performExport() {
             const cols = Math.ceil(Math.sqrt(selectedIndices.length));
             
             loadedGeometries.forEach((geo, index) => {
+                if (!geo) {
+                    console.warn('No geometry for part at index', index);
+                    return;
+                }
                 const clonedGeo = geo.clone();
                 const row = Math.floor(index / cols);
                 const col = index % cols;
@@ -1576,7 +1601,15 @@ async function performExport() {
                 geometries.push(clonedGeo);
             });
             
-            const mergedGeometry = mergeGeometries(geometries);
+            if (geometries.length === 0) {
+                throw new Error('No valid geometries to export');
+            }
+            
+            const mergedGeometry = mergeGeometries(geometries, false);
+            if (!mergedGeometry) {
+                throw new Error('Failed to merge geometries');
+            }
+            
             const stlData = exportToSTL(mergedGeometry);
             downloadFile(stlData, `${state.currentModelName || 'lego-parts'}.stl`);
         }
