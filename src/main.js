@@ -779,13 +779,15 @@ function setupWorkspace() {
     document.getElementById('selectAll').addEventListener('click', () => {
         state.selectedParts = new Set(state.parts.map((_, i) => i));
         renderPartsList();
-        updatePreview();
+        updatePartVisuals();
+        updateCounts();
     });
 
     document.getElementById('selectNone').addEventListener('click', () => {
         state.selectedParts.clear();
         renderPartsList();
-        updatePreview();
+        updatePartVisuals();
+        updateCounts();
     });
     
     // Select only parts user doesn't have enough of
@@ -798,7 +800,8 @@ function setupWorkspace() {
             }
         });
         renderPartsList();
-        updatePreview();
+        updatePartVisuals();
+        updateCounts();
     });
 
     document.getElementById('exportSTL').addEventListener('click', showExportModal);
@@ -1020,7 +1023,22 @@ function togglePart(index, force = null) {
     }
     
     renderPartsList(document.getElementById('searchParts').value);
-    updatePreview();
+    
+    // Update 3D mesh opacity without rebuilding the scene
+    updatePartVisuals();
+}
+
+function updatePartVisuals() {
+    if (!state.partsGroup) return;
+    
+    state.partsGroup.traverse((child) => {
+        if (child.isMesh && child.userData.partIndex !== undefined) {
+            const isSelected = state.selectedParts.has(child.userData.partIndex);
+            child.material.opacity = isSelected ? 1 : 0.3;
+            child.material.transparent = !isSelected;
+            child.material.needsUpdate = true;
+        }
+    });
 }
 
 function updateCounts() {
