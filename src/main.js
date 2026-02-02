@@ -1180,7 +1180,7 @@ async function updatePreview() {
             const part = state.parts[i];
             const qty = part.quantity || 1;
             for (let q = 0; q < qty; q++) {
-                instances.push({ partIndex: i, part, instanceNum: q });
+                instances.push({ partIndex: i, part });
             }
         }
         
@@ -1188,12 +1188,12 @@ async function updatePreview() {
         let loaded = 0;
         updateLoadingStatus(`Loading parts: 0/${totalInstances}`);
         
-        // Cache geometries and their sizes
+        // Cache geometries and find max size
         const geometryCache = new Map();
-        const sizeCache = new Map();
-        const padding = 15; // Gap between parts
+        let maxWidth = 0, maxDepth = 0;
+        const padding = 20;
         
-        // First pass: load all unique geometries and measure sizes
+        // First pass: load all unique geometries and find largest
         for (const part of state.parts) {
             if (!geometryCache.has(part.id)) {
                 let geometry;
@@ -1213,76 +1213,57 @@ async function updatePreview() {
                 // Measure bounding box
                 geometry.computeBoundingBox();
                 const box = geometry.boundingBox;
-                const size = {
-                    width: box.max.x - box.min.x,
-                    height: box.max.y - box.min.y,
-                    depth: box.max.z - box.min.z
-                };
-                sizeCache.set(part.id, size);
+                const w = box.max.x - box.min.x;
+                const d = box.max.z - box.min.z;
+                maxWidth = Math.max(maxWidth, w);
+                maxDepth = Math.max(maxDepth, d);
+            }
+            
+            loaded++;
+            if (loaded % 5 === 0) {
+                updateLoadingStatus(`Loading geometries: ${loaded}/${state.parts.length}`);
             }
         }
         
-        // Calculate layout - row by row with variable widths
-        const maxRowWidth = Math.sqrt(totalInstances) * 80; // Approximate target width
-        const rows = [];
-        let currentRow = [];
-        let currentRowWidth = 0;
+        // Uniform cell size based on largest part
+        const cellWidth = maxWidth + padding;
+        const cellDepth = maxDepth + padding;
+        const cols = Math.ceil(Math.sqrt(totalInstances));
         
-        for (const instance of instances) {
-            const size = sizeCache.get(instance.part.id);
-            const itemWidth = Math.max(size.width, size.depth) + padding;
+        // Second pass: place all instances in grid
+        loaded = 0;
+        for (let i = 0; i < instances.length; i++) {
+            const { partIndex, part } = instances[i];
+            const row = Math.floor(i / cols);
+            const col = i % cols;
             
-            if (currentRowWidth + itemWidth > maxRowWidth && currentRow.length > 0) {
-                rows.push({ items: currentRow, width: currentRowWidth });
-                currentRow = [];
-                currentRowWidth = 0;
+            const x = (col - cols / 2 + 0.5) * cellWidth;
+            const z = (row - Math.ceil(totalInstances / cols) / 2 + 0.5) * cellDepth;
+            
+            const geometry = geometryCache.get(part.id);
+            const isSelected = state.selectedParts.has(partIndex);
+            const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
+            
+            const material = new THREE.MeshPhongMaterial({ 
+                color: colorHex,
+                opacity: isSelected ? 1 : 0.3,
+                transparent: !isSelected,
+                flatShading: false
+            });
+            
+            const mesh = new THREE.Mesh(geometry.clone(), material);
+            mesh.position.set(x, 0, z);
+            mesh.userData = { partIndex };
+            state.partsGroup.add(mesh);
+            
+            loaded++;
+            if (loaded % 20 === 0 || loaded === totalInstances) {
+                updateLoadingStatus(`Placing parts: ${loaded}/${totalInstances}`);
             }
-            
-            currentRow.push({ ...instance, size, itemWidth });
-            currentRowWidth += itemWidth;
-        }
-        if (currentRow.length > 0) {
-            rows.push({ items: currentRow, width: currentRowWidth });
-        }
-        
-        // Second pass: place meshes with proper spacing
-        let zOffset = 0;
-        for (const row of rows) {
-            // Find tallest item depth for row spacing
-            const maxDepth = Math.max(...row.items.map(item => item.size.depth)) + padding;
-            
-            let xOffset = -row.width / 2;
-            for (const item of row.items) {
-                const { partIndex, part, size, itemWidth } = item;
-                const geometry = geometryCache.get(part.id);
-                const isSelected = state.selectedParts.has(partIndex);
-                const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
-                
-                const material = new THREE.MeshPhongMaterial({ 
-                    color: colorHex,
-                    opacity: isSelected ? 1 : 0.3,
-                    transparent: !isSelected,
-                    flatShading: false
-                });
-                
-                const mesh = new THREE.Mesh(geometry.clone(), material);
-                mesh.position.set(xOffset + itemWidth / 2, 0, zOffset);
-                mesh.userData = { partIndex };
-                state.partsGroup.add(mesh);
-                
-                xOffset += itemWidth;
-                loaded++;
-                
-                if (loaded % 20 === 0 || loaded === totalInstances) {
-                    updateLoadingStatus(`Placing parts: ${loaded}/${totalInstances}`);
-                }
-            }
-            
-            zOffset += maxDepth;
         }
         
         updateLoadingStatus('');
-        console.log(`Preview loaded: ${loaded}/${totalInstances} instances from ${state.parts.length} unique parts`);
+        console.log(`Preview loaded: ${totalInstances} instances, cell size: ${cellWidth.toFixed(0)}x${cellDepth.toFixed(0)}`);
         centerOnGroup(state.partsGroup);
     }
 }
