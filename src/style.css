@@ -247,6 +247,7 @@ header p {
 .workspace-content {
     display: grid;
     grid-template-columns: 1fr 400px;
+    height: calc(100vh - 280px);
     min-height: 500px;
 }
 
