@@ -115,18 +115,33 @@ export async function getPartGeometry(partId) {
         
         // Try bundled parts first
         if (BUNDLED_PARTS[cleanId]) {
-            const geo = createBundledGeometry(cleanId, BUNDLED_PARTS[cleanId]);
-            if (geo) {
-                partCache.set(cleanId, geo);
-                return geo.clone();
+            try {
+                const geo = createBundledGeometry(cleanId, BUNDLED_PARTS[cleanId]);
+                if (geo) {
+                    partCache.set(cleanId, geo);
+                    return geo.clone();
+                }
+            } catch (e) {
+                console.warn('Bundled geometry failed for', cleanId, e);
             }
         }
         
-        // Skip external fetching - it's unreliable and slow
-        // Just use fallback geometry based on part ID
-        const fallback = createFallbackGeometry(cleanId);
-        partCache.set(cleanId, fallback);
-        return fallback.clone();
+        // Use fallback geometry based on part ID
+        try {
+            const fallback = createFallbackGeometry(cleanId);
+            if (fallback) {
+                partCache.set(cleanId, fallback);
+                return fallback.clone();
+            }
+        } catch (e) {
+            console.warn('Fallback geometry failed for', cleanId, e);
+        }
+        
+        // Ultimate fallback - simple box
+        const box = new THREE.BoxGeometry(20, 24, 20);
+        box.translate(0, 12, 0);
+        partCache.set(cleanId, box);
+        return box.clone();
         
     } catch (e) {
         console.warn('Error getting geometry for', partId, e);
@@ -397,19 +412,31 @@ function createSimpleBox(width, height, depth) {
  * Create BufferGeometry from vertices and indices
  */
 function createBufferGeometry(vertices, indices) {
-    const positions = new Float32Array(vertices.length * 3);
-    for (let i = 0; i < vertices.length; i++) {
-        positions[i * 3] = vertices[i][0];
-        positions[i * 3 + 1] = vertices[i][1];
-        positions[i * 3 + 2] = vertices[i][2];
+    if (!vertices || vertices.length === 0) {
+        console.warn('Empty vertices, using fallback box');
+        return new THREE.BoxGeometry(20, 24, 20);
     }
     
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-    
-    return geometry;
+    try {
+        const positions = new Float32Array(vertices.length * 3);
+        for (let i = 0; i < vertices.length; i++) {
+            positions[i * 3] = vertices[i][0];
+            positions[i * 3 + 1] = vertices[i][1];
+            positions[i * 3 + 2] = vertices[i][2];
+        }
+        
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        if (indices && indices.length > 0) {
+            geometry.setIndex(indices);
+        }
+        geometry.computeVertexNormals();
+        
+        return geometry;
+    } catch (e) {
+        console.warn('Failed to create buffer geometry:', e);
+        return new THREE.BoxGeometry(20, 24, 20);
+    }
 }
 
 /**
