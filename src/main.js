@@ -870,7 +870,10 @@ function setViewMode(mode) {
 }
 
 function showWorkspace(name) {
-    document.getElementById('workspace').style.display = 'block';
+    const workspace = document.getElementById('workspace');
+    workspace.style.display = 'block';
+    // Force reflow so container has dimensions
+    workspace.offsetHeight;
     document.getElementById('designName').textContent = name;
     document.querySelector('.upload-section').style.display = 'none';
 }
@@ -1056,12 +1059,15 @@ function init3DPreview() {
     const container = document.getElementById('preview3d');
     container.innerHTML = '';
     
+    // Force layout recalculation
+    container.offsetHeight;
+    
     console.log('Initializing 3D preview, container size:', container.clientWidth, 'x', container.clientHeight);
     
-    // Ensure container has dimensions
+    // Ensure container has dimensions - wait longer if needed
     if (container.clientWidth === 0 || container.clientHeight === 0) {
         console.warn('Preview container has no size, waiting...');
-        setTimeout(() => init3DPreview(), 100);
+        setTimeout(() => init3DPreview(), 200);
         return;
     }
     
@@ -1097,7 +1103,7 @@ function init3DPreview() {
     const gridHelper = new THREE.GridHelper(500, 50, 0x444444, 0x333333);
     state.scene.add(gridHelper);
     
-    updatePreview();
+    updatePreview().catch(err => console.error('Preview update failed:', err));
     
     function animate() {
         requestAnimationFrame(animate);
