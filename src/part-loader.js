@@ -1,18 +1,7 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-
-// LDraw parts library sources (try multiple)
-const PART_SOURCES = [
-    'https://cdn.jsdelivr.net/gh/nicoschwabe/ldraw-parts@main/parts/',
-    'https://raw.githubusercontent.com/nicoschwabe/ldraw-parts/main/parts/',
-];
 
 // Cache for loaded parts
 const partCache = new Map();
-const loadingPromises = new Map();
-
-// LDraw unit scale (20 LDU = 1 stud = 8mm real)
-const LDU_SCALE = 1;
 
 /**
  * Pre-bundled basic parts (most common bricks)
@@ -117,40 +106,35 @@ const BUNDLED_PARTS = {
 export async function getPartGeometry(partId) {
     const cleanId = partId.toString().toLowerCase().replace(/[a-z]$/, '');
     
-    // Check cache first
-    if (partCache.has(cleanId)) {
-        return partCache.get(cleanId).clone();
+    try {
+        // Check cache first
+        if (partCache.has(cleanId)) {
+            const cached = partCache.get(cleanId);
+            return cached ? cached.clone() : createFallbackGeometry(cleanId);
+        }
+        
+        // Try bundled parts first
+        if (BUNDLED_PARTS[cleanId]) {
+            const geo = createBundledGeometry(cleanId, BUNDLED_PARTS[cleanId]);
+            if (geo) {
+                partCache.set(cleanId, geo);
+                return geo.clone();
+            }
+        }
+        
+        // Skip external fetching - it's unreliable and slow
+        // Just use fallback geometry based on part ID
+        const fallback = createFallbackGeometry(cleanId);
+        partCache.set(cleanId, fallback);
+        return fallback.clone();
+        
+    } catch (e) {
+        console.warn('Error getting geometry for', partId, e);
+        // Ultimate fallback - simple box
+        const box = new THREE.BoxGeometry(20, 24, 20);
+        box.translate(0, 12, 0);
+        return box;
     }
-    
-    // Check if already loading
-    if (loadingPromises.has(cleanId)) {
-        const geo = await loadingPromises.get(cleanId);
-        return geo ? geo.clone() : createFallbackGeometry(cleanId);
-    }
-    
-    // Try bundled parts first
-    if (BUNDLED_PARTS[cleanId]) {
-        const geo = createBundledGeometry(cleanId, BUNDLED_PARTS[cleanId]);
-        partCache.set(cleanId, geo);
-        return geo.clone();
-    }
-    
-    // Try to fetch from LDraw library
-    const fetchPromise = fetchPartGeometry(cleanId);
-    loadingPromises.set(cleanId, fetchPromise);
-    
-    const geo = await fetchPromise;
-    loadingPromises.delete(cleanId);
-    
-    if (geo) {
-        partCache.set(cleanId, geo);
-        return geo.clone();
-    }
-    
-    // Fallback to basic brick
-    const fallback = createFallbackGeometry(cleanId);
-    partCache.set(cleanId, fallback);
-    return fallback.clone();
 }
 
 /**
@@ -160,199 +144,25 @@ function createBundledGeometry(partId, def) {
     const [studsX, heightUnits, studsZ] = def.dims;
     const STUD = 20;  // 20 LDU per stud
     const PLATE_H = 8;
-    const BRICK_H = 24;
     
     const width = studsX * STUD;
     const depth = studsZ * STUD;
     const height = def.plate ? PLATE_H : (def.tile ? 4 : heightUnits * PLATE_H);
     
-    const geometries = [];
-    
-    if (def.round || def.cone) {
-        // Cylindrical parts
-        const radius = Math.min(width, depth) / 2 * 0.9;
-        if (def.cone) {
-            geometries.push(new THREE.ConeGeometry(radius, height, 16));
-        } else {
-            geometries.push(new THREE.CylinderGeometry(radius, radius, height, 16));
-        }
-    } else if (def.slope) {
-        // Slope geometry
-        geometries.push(createSlopeGeometry(width, height, depth, def.slope, def.double));
-    } else if (def.slopeInv) {
-        // Inverted slope
-        const slopeGeo = createSlopeGeometry(width, height, depth, def.slopeInv);
-        slopeGeo.rotateX(Math.PI);
-        geometries.push(slopeGeo);
-    } else if (def.curvedSlope) {
-        // Curved slope approximation
-        geometries.push(createCurvedSlopeGeometry(width, height, depth));
-    } else {
-        // Standard box
-        const bodyGeo = new THREE.BoxGeometry(width * 0.98, height, depth * 0.98);
+    try {
+        // Just use a simple box - mergeGeometries causes issues
+        const bodyGeo = new THREE.BoxGeometry(width * 0.95, height, depth * 0.95);
         bodyGeo.translate(0, height / 2, 0);
-        geometries.push(bodyGeo);
+        return bodyGeo;
+    } catch (e) {
+        console.warn('Failed to create geometry for', partId, e);
+        return new THREE.BoxGeometry(20, 24, 20);
     }
-    
-    // Add studs (unless tile or special part)
-    if (!def.tile && !def.cone && !def.pin && !def.tire) {
-        const studGeo = new THREE.CylinderGeometry(6, 6, 4, 12);
-        for (let sx = 0; sx < studsX; sx++) {
-            for (let sz = 0; sz < studsZ; sz++) {
-                const stud = studGeo.clone();
-                stud.translate(
-                    (sx - (studsX - 1) / 2) * STUD,
-                    height + 2,
-                    (sz - (studsZ - 1) / 2) * STUD
-                );
-                geometries.push(stud);
-            }
-        }
-    }
-    
-    return mergeGeometries(geometries);
 }
 
 /**
  * Create slope geometry
  */
-function createSlopeGeometry(width, height, depth, angle, double = false) {
-    const shape = new THREE.Shape();
-    
-    if (double) {
-        // Peaked roof shape
-        shape.moveTo(-width/2, 0);
-        shape.lineTo(width/2, 0);
-        shape.lineTo(width/2, height * 0.3);
-        shape.lineTo(0, height);
-        shape.lineTo(-width/2, height * 0.3);
-        shape.closePath();
-    } else {
-        // Single slope
-        shape.moveTo(-width/2, 0);
-        shape.lineTo(width/2, 0);
-        shape.lineTo(width/2, height);
-        shape.lineTo(-width/2, height * 0.3);
-        shape.closePath();
-    }
-    
-    const extrudeSettings = { depth: depth, bevelEnabled: false };
-    const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(0, 0, depth/2);
-    
-    return geo;
-}
-
-/**
- * Create curved slope geometry
- */
-function createCurvedSlopeGeometry(width, height, depth) {
-    const shape = new THREE.Shape();
-    shape.moveTo(-width/2, 0);
-    shape.lineTo(width/2, 0);
-    shape.lineTo(width/2, height * 0.2);
-    shape.quadraticCurveTo(width/4, height, -width/2, height);
-    shape.closePath();
-    
-    const extrudeSettings = { depth: depth, bevelEnabled: false };
-    const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(0, 0, depth/2);
-    
-    return geo;
-}
-
-/**
- * Fetch and parse LDraw .dat file
- */
-async function fetchPartGeometry(partId) {
-    for (const baseUrl of PART_SOURCES) {
-        try {
-            const url = `${baseUrl}${partId}.dat`;
-            const response = await fetch(url);
-            
-            if (!response.ok) continue;
-            
-            const text = await response.text();
-            return parseLDrawDat(text);
-        } catch (e) {
-            continue;
-        }
-    }
-    return null;
-}
-
-/**
- * Parse LDraw .dat file format into Three.js geometry
- */
-function parseLDrawDat(content) {
-    const lines = content.split('\n');
-    const vertices = [];
-    const triangles = [];
-    const quads = [];
-    
-    for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        if (!parts.length) continue;
-        
-        const type = parseInt(parts[0]);
-        
-        switch (type) {
-            case 3: // Triangle
-                if (parts.length >= 11) {
-                    triangles.push([
-                        [parseFloat(parts[2]), parseFloat(parts[3]), parseFloat(parts[4])],
-                        [parseFloat(parts[5]), parseFloat(parts[6]), parseFloat(parts[7])],
-                        [parseFloat(parts[8]), parseFloat(parts[9]), parseFloat(parts[10])]
-                    ]);
-                }
-                break;
-                
-            case 4: // Quad
-                if (parts.length >= 14) {
-                    quads.push([
-                        [parseFloat(parts[2]), parseFloat(parts[3]), parseFloat(parts[4])],
-                        [parseFloat(parts[5]), parseFloat(parts[6]), parseFloat(parts[7])],
-                        [parseFloat(parts[8]), parseFloat(parts[9]), parseFloat(parts[10])],
-                        [parseFloat(parts[11]), parseFloat(parts[12]), parseFloat(parts[13])]
-                    ]);
-                }
-                break;
-        }
-    }
-    
-    // Convert to BufferGeometry
-    const positions = [];
-    
-    // Add triangles
-    for (const tri of triangles) {
-        for (const v of tri) {
-            positions.push(v[0] * LDU_SCALE, -v[1] * LDU_SCALE, v[2] * LDU_SCALE);
-        }
-    }
-    
-    // Add quads as two triangles
-    for (const quad of quads) {
-        // First triangle
-        positions.push(quad[0][0] * LDU_SCALE, -quad[0][1] * LDU_SCALE, quad[0][2] * LDU_SCALE);
-        positions.push(quad[1][0] * LDU_SCALE, -quad[1][1] * LDU_SCALE, quad[1][2] * LDU_SCALE);
-        positions.push(quad[2][0] * LDU_SCALE, -quad[2][1] * LDU_SCALE, quad[2][2] * LDU_SCALE);
-        // Second triangle
-        positions.push(quad[0][0] * LDU_SCALE, -quad[0][1] * LDU_SCALE, quad[0][2] * LDU_SCALE);
-        positions.push(quad[2][0] * LDU_SCALE, -quad[2][1] * LDU_SCALE, quad[2][2] * LDU_SCALE);
-        positions.push(quad[3][0] * LDU_SCALE, -quad[3][1] * LDU_SCALE, quad[3][2] * LDU_SCALE);
-    }
-    
-    if (positions.length === 0) return null;
-    
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.computeVertexNormals();
-    
-    return geometry;
-}
-
 /**
  * Create fallback geometry for unknown parts
  */
@@ -362,28 +172,15 @@ function createFallbackGeometry(partId) {
     const STUD = 20;
     const height = dims.h * 8;
     
-    const geometries = [];
-    
-    // Body
-    const body = new THREE.BoxGeometry(dims.x * STUD * 0.98, height, dims.z * STUD * 0.98);
-    body.translate(0, height / 2, 0);
-    geometries.push(body);
-    
-    // Studs
-    const studGeo = new THREE.CylinderGeometry(6, 6, 4, 12);
-    for (let sx = 0; sx < dims.x; sx++) {
-        for (let sz = 0; sz < dims.z; sz++) {
-            const stud = studGeo.clone();
-            stud.translate(
-                (sx - (dims.x - 1) / 2) * STUD,
-                height + 2,
-                (sz - (dims.z - 1) / 2) * STUD
-            );
-            geometries.push(stud);
-        }
+    try {
+        // Simple box geometry - avoid mergeGeometries issues
+        const body = new THREE.BoxGeometry(dims.x * STUD * 0.95, height, dims.z * STUD * 0.95);
+        body.translate(0, height / 2, 0);
+        return body;
+    } catch (e) {
+        console.warn('Failed to create fallback geometry for', partId, e);
+        return new THREE.BoxGeometry(20, 24, 20);
     }
-    
-    return mergeGeometries(geometries);
 }
 
 /**
@@ -414,16 +211,16 @@ function guessDimensions(partId) {
  * Preload common parts
  */
 export async function preloadCommonParts() {
-    const commonParts = [
-        '3001', '3002', '3003', '3004', '3005', '3010',
-        '3020', '3021', '3022', '3023', '3024',
-        '3039', '3040', '3037',
-        '3710', '3666', '3795',
-        '4589', '3062b'
-    ];
-    
-    await Promise.all(commonParts.map(id => getPartGeometry(id)));
-    console.log(`Preloaded ${commonParts.length} common parts`);
+    // Pre-generate geometries for bundled parts
+    const bundledIds = Object.keys(BUNDLED_PARTS);
+    for (const id of bundledIds) {
+        try {
+            await getPartGeometry(id);
+        } catch (e) {
+            console.warn('Failed to preload', id);
+        }
+    }
+    console.log(`Preloaded ${bundledIds.length} common parts`);
 }
 
 /**

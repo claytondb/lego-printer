@@ -1038,15 +1038,6 @@ function init3DPreview() {
     const gridHelper = new THREE.GridHelper(500, 50, 0x444444, 0x333333);
     state.scene.add(gridHelper);
     
-    // Add a test cube to verify rendering works
-    const testGeo = new THREE.BoxGeometry(30, 30, 30);
-    const testMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-    const testCube = new THREE.Mesh(testGeo, testMat);
-    testCube.position.set(0, 15, 0);
-    testCube.name = 'testCube';
-    state.scene.add(testCube);
-    console.log('Added test cube to scene');
-    
     updatePreview();
     
     function animate() {
