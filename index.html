@@ -110,27 +110,45 @@
         </section>
     </div>
 
-    <!-- Catalog Modal (Rebrickable Search) -->
+    <!-- Catalog Modal -->
     <div id="catalogModal" class="modal">
         <div class="modal-content catalog-modal">
             <div class="modal-header">
-                <h2>🔍 Search Official Sets</h2>
+                <h2>🧱 LEGO Set Catalog</h2>
                 <button id="closeCatalog" class="close-btn">&times;</button>
             </div>
             
             <div class="catalog-search-bar">
-                <input type="text" id="rebrickableSearch" placeholder="Search by name or set number (e.g. 'Millennium Falcon' or '75192')">
+                <input type="text" id="rebrickableSearch" placeholder="Search by name or set number...">
                 <button id="searchBtn" class="primary">Search</button>
             </div>
             
-            <div id="searchResults" class="catalog-grid">
-                <div class="search-hint">
-                    <p>🔍 Search for any official LEGO set</p>
-                    <p class="hint-sub">Powered by Rebrickable database</p>
+            <div class="catalog-tabs">
+                <button class="tab-btn active" data-tab="featured">⭐ Featured</button>
+                <button class="tab-btn" data-tab="themes">📂 Browse Themes</button>
+            </div>
+            
+            <div id="catalogContent">
+                <!-- Featured tab -->
+                <div id="featuredTab" class="tab-content active">
+                    <div id="featuredGrid" class="catalog-grid">
+                        <div class="loading-placeholder">Loading featured sets...</div>
+                    </div>
+                </div>
+                
+                <!-- Themes tab -->
+                <div id="themesTab" class="tab-content">
+                    <div id="themesList" class="themes-grid">
+                        <div class="loading-placeholder">Loading themes...</div>
+                    </div>
+                    <div id="themesSetsGrid" class="catalog-grid" style="display: none;"></div>
+                    <button id="backToThemes" class="back-btn" style="display: none;">← Back to Themes</button>
                 </div>
             </div>
             
-            <div id="searchPagination" class="pagination" style="display: none;">
+            <div id="searchResults" class="catalog-grid" style="display: none;"></div>
+            
+            <div id="catalogPagination" class="pagination" style="display: none;">
                 <button id="prevPage" disabled>← Previous</button>
                 <span id="pageInfo">Page 1</span>
                 <button id="nextPage">Next →</button>

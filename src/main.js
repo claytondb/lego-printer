@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import JSZip from 'jszip';
 import { LDRAW_COLORS } from './ldraw-colors.js';
 import { getPartGeometry, preloadCommonParts, getCacheStats } from './part-loader.js';
-import { searchSets, getSetParts, getSetDetails, rebrickableToLDrawColor } from './rebrickable.js';
+import { searchSets, getSetParts, getSetDetails, getPopularSets, getThemes, getSetsByTheme, rebrickableToLDrawColor } from './rebrickable.js';
 import { loadInventory, saveInventory, getOwnedQuantity, setOwnedPart, getInventoryStats, clearInventory } from './inventory.js';
 import { calculateTotalCost, estimate3DPrintCost, formatPrice, getBrickLinkUrl } from './bricklink.js';
 
@@ -25,7 +25,9 @@ const state = {
     colorFilter: '',        // Current color filter
     searchPage: 1,          // Rebrickable search page
     searchQuery: '',        // Current search query
-    searchResults: null     // Cached search results
+    searchResults: null,    // Cached search results
+    currentThemeId: null,   // Current theme being browsed
+    currentThemeName: ''    // Current theme name
 };
 
 // Initialize
@@ -73,15 +75,16 @@ function setupPWAInstall() {
     });
 }
 
-// Rebrickable Search
+// Rebrickable Catalog
 function setupRebrickableSearch() {
     const modal = document.getElementById('catalogModal');
     const searchInput = document.getElementById('rebrickableSearch');
     const searchBtn = document.getElementById('searchBtn');
-    const resultsGrid = document.getElementById('searchResults');
     
     document.getElementById('catalogBtn').addEventListener('click', () => {
         modal.style.display = 'flex';
+        loadFeaturedSets();
+        loadThemes();
     });
     
     document.getElementById('closeCatalog').addEventListener('click', () => {
@@ -92,7 +95,22 @@ function setupRebrickableSearch() {
         if (e.target === modal) modal.style.display = 'none';
     });
     
-    // Search on button click or Enter
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.tab + 'Tab').classList.add('active');
+            
+            // Hide search results when switching tabs
+            document.getElementById('searchResults').style.display = 'none';
+            document.getElementById('catalogContent').style.display = 'block';
+            document.getElementById('catalogPagination').style.display = 'none';
+        });
+    });
+    
+    // Search
     searchBtn.addEventListener('click', () => performSearch());
     searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') performSearch();
@@ -102,67 +120,199 @@ function setupRebrickableSearch() {
     document.getElementById('prevPage').addEventListener('click', () => {
         if (state.searchPage > 1) {
             state.searchPage--;
-            performSearch(false);
+            if (state.currentThemeId) {
+                loadThemeSets(state.currentThemeId, false);
+            } else {
+                performSearch(false);
+            }
         }
     });
     
     document.getElementById('nextPage').addEventListener('click', () => {
         state.searchPage++;
-        performSearch(false);
+        if (state.currentThemeId) {
+            loadThemeSets(state.currentThemeId, false);
+        } else {
+            performSearch(false);
+        }
+    });
+    
+    // Back to themes
+    document.getElementById('backToThemes').addEventListener('click', () => {
+        document.getElementById('themesList').style.display = 'grid';
+        document.getElementById('themesSetsGrid').style.display = 'none';
+        document.getElementById('backToThemes').style.display = 'none';
+        document.getElementById('catalogPagination').style.display = 'none';
+        state.currentThemeId = null;
     });
 }
 
+// Load featured sets
+async function loadFeaturedSets() {
+    const grid = document.getElementById('featuredGrid');
+    if (grid.dataset.loaded) return;
+    
+    grid.innerHTML = '<div class="loading-placeholder"><div class="loading-spinner"></div> Loading featured sets...</div>';
+    
+    try {
+        const results = await getPopularSets(1, 12);
+        grid.innerHTML = renderSetGrid(results.sets);
+        attachSetClickHandlers(grid);
+        grid.dataset.loaded = 'true';
+    } catch (error) {
+        console.error('Failed to load featured sets:', error);
+        grid.innerHTML = '<div class="loading-placeholder">Failed to load featured sets</div>';
+    }
+}
+
+// Load themes
+async function loadThemes() {
+    const grid = document.getElementById('themesList');
+    if (grid.dataset.loaded) return;
+    
+    grid.innerHTML = '<div class="loading-placeholder"><div class="loading-spinner"></div> Loading themes...</div>';
+    
+    try {
+        const themes = await getThemes();
+        
+        // Theme icons mapping
+        const themeIcons = {
+            'Technic': '⚙️',
+            'Star Wars': '⭐',
+            'Harry Potter': '⚡',
+            'Architecture': '🏛️',
+            'Speed Champions': '🏎️',
+            'Creator Expert': '🎨',
+            'Ideas': '💡',
+            'Creator 3-in-1': '🔄',
+            'City': '🏙️',
+            'Ninjago': '🥷',
+            'Super Heroes': '🦸',
+            'Icons': '🏆',
+            'Disney': '🏰',
+            'Friends': '💜',
+            'Minecraft': '⛏️',
+            'DUPLO': '👶',
+            'Classic': '🧱',
+        };
+        
+        grid.innerHTML = themes.slice(0, 20).map(theme => `
+            <div class="theme-card" data-theme-id="${theme.id}" data-theme-name="${theme.name}">
+                <div class="theme-icon">${themeIcons[theme.name] || '📦'}</div>
+                <div class="theme-name">${theme.name}</div>
+            </div>
+        `).join('');
+        
+        grid.querySelectorAll('.theme-card').forEach(card => {
+            card.addEventListener('click', () => {
+                state.currentThemeId = card.dataset.themeId;
+                state.currentThemeName = card.dataset.themeName;
+                loadThemeSets(card.dataset.themeId);
+            });
+        });
+        
+        grid.dataset.loaded = 'true';
+    } catch (error) {
+        console.error('Failed to load themes:', error);
+        grid.innerHTML = '<div class="loading-placeholder">Failed to load themes</div>';
+    }
+}
+
+// Load sets for a theme
+async function loadThemeSets(themeId, resetPage = true) {
+    if (resetPage) state.searchPage = 1;
+    
+    const grid = document.getElementById('themesSetsGrid');
+    const themesList = document.getElementById('themesList');
+    const backBtn = document.getElementById('backToThemes');
+    
+    themesList.style.display = 'none';
+    grid.style.display = 'grid';
+    backBtn.style.display = 'block';
+    grid.innerHTML = '<div class="loading-placeholder"><div class="loading-spinner"></div> Loading sets...</div>';
+    
+    try {
+        const results = await getSetsByTheme(themeId, state.searchPage, 12);
+        grid.innerHTML = renderSetGrid(results.sets);
+        attachSetClickHandlers(grid);
+        
+        // Pagination
+        const totalPages = Math.ceil(results.count / 12);
+        document.getElementById('catalogPagination').style.display = 'flex';
+        document.getElementById('pageInfo').textContent = `Page ${state.searchPage} of ${totalPages}`;
+        document.getElementById('prevPage').disabled = state.searchPage <= 1;
+        document.getElementById('nextPage').disabled = state.searchPage >= totalPages;
+        
+    } catch (error) {
+        console.error('Failed to load theme sets:', error);
+        grid.innerHTML = '<div class="loading-placeholder">Failed to load sets</div>';
+    }
+}
+
+// Search sets
 async function performSearch(resetPage = true) {
     const query = document.getElementById('rebrickableSearch').value.trim();
     if (!query) return;
     
     if (resetPage) state.searchPage = 1;
     state.searchQuery = query;
+    state.currentThemeId = null;
     
+    // Show search results, hide tabs content
+    document.getElementById('catalogContent').style.display = 'none';
     const resultsGrid = document.getElementById('searchResults');
-    resultsGrid.innerHTML = '<div class="search-hint"><div class="loading-spinner"></div><p>Searching...</p></div>';
+    resultsGrid.style.display = 'grid';
+    resultsGrid.innerHTML = '<div class="loading-placeholder"><div class="loading-spinner"></div> Searching...</div>';
     
     try {
         const results = await searchSets(query, state.searchPage, 12);
         state.searchResults = results;
         
         if (results.sets.length === 0) {
-            resultsGrid.innerHTML = '<div class="search-hint"><p>No sets found for "' + query + '"</p></div>';
-            document.getElementById('searchPagination').style.display = 'none';
+            resultsGrid.innerHTML = '<div class="loading-placeholder">No sets found for "' + query + '"</div>';
+            document.getElementById('catalogPagination').style.display = 'none';
             return;
         }
         
-        resultsGrid.innerHTML = results.sets.map(set => `
-            <div class="catalog-item" data-set-num="${set.id}">
-                <div class="catalog-thumb">
-                    ${set.image ? `<img src="${set.image}" alt="${set.name}">` : '<span class="emoji-thumb">🧱</span>'}
-                </div>
-                <div class="catalog-info">
-                    <div class="catalog-name">${set.name}</div>
-                    <div class="catalog-meta">
-                        <span>#${set.number}</span>
-                        <span>${set.pieces} pcs</span>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-        
-        // Click handlers
-        resultsGrid.querySelectorAll('.catalog-item').forEach(item => {
-            item.addEventListener('click', () => loadRebrickableSet(item.dataset.setNum));
-        });
+        resultsGrid.innerHTML = renderSetGrid(results.sets);
+        attachSetClickHandlers(resultsGrid);
         
         // Pagination
         const totalPages = Math.ceil(results.count / 12);
-        document.getElementById('searchPagination').style.display = 'flex';
+        document.getElementById('catalogPagination').style.display = 'flex';
         document.getElementById('pageInfo').textContent = `Page ${state.searchPage} of ${totalPages}`;
         document.getElementById('prevPage').disabled = state.searchPage <= 1;
         document.getElementById('nextPage').disabled = state.searchPage >= totalPages;
         
     } catch (error) {
         console.error('Search error:', error);
-        resultsGrid.innerHTML = '<div class="search-hint"><p>Search failed. Please try again.</p></div>';
+        resultsGrid.innerHTML = '<div class="loading-placeholder">Search failed. Please try again.</div>';
     }
+}
+
+// Render set grid HTML
+function renderSetGrid(sets) {
+    return sets.map(set => `
+        <div class="catalog-item" data-set-num="${set.id}">
+            <div class="catalog-thumb">
+                ${set.image ? `<img src="${set.image}" alt="${set.name}" loading="lazy">` : '<span class="emoji-thumb">🧱</span>'}
+            </div>
+            <div class="catalog-info">
+                <div class="catalog-name">${set.name}</div>
+                <div class="catalog-meta">
+                    <span>#${set.number}</span>
+                    <span>${set.pieces} pcs</span>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Attach click handlers to set cards
+function attachSetClickHandlers(container) {
+    container.querySelectorAll('.catalog-item').forEach(item => {
+        item.addEventListener('click', () => loadRebrickableSet(item.dataset.setNum));
+    });
 }
 
 async function loadRebrickableSet(setNum) {

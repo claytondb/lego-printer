@@ -104,9 +104,79 @@ export async function getSetDetails(setNum) {
  * Get popular/featured sets
  */
 export async function getPopularSets(page = 1, pageSize = 20) {
-    // Get sets from recent years, sorted by parts count
     const currentYear = new Date().getFullYear();
-    const url = `${BASE_URL}/lego/sets/?min_year=${currentYear - 2}&ordering=-num_parts&page=${page}&page_size=${pageSize}`;
+    const url = `${BASE_URL}/lego/sets/?min_year=${currentYear - 2}&min_parts=100&ordering=-num_parts&page=${page}&page_size=${pageSize}`;
+    
+    const response = await fetch(url, {
+        headers: { 'Authorization': `key ${API_KEY}` }
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Rebrickable API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    return {
+        count: data.count,
+        sets: data.results.map(set => ({
+            id: set.set_num,
+            name: set.name,
+            number: set.set_num.replace(/-\d+$/, ''),
+            year: set.year,
+            pieces: set.num_parts,
+            image: set.set_img_url
+        }))
+    };
+}
+
+/**
+ * Get themes (categories)
+ */
+export async function getThemes() {
+    const url = `${BASE_URL}/lego/themes/?page_size=500`;
+    
+    const response = await fetch(url, {
+        headers: { 'Authorization': `key ${API_KEY}` }
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Rebrickable API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Build theme hierarchy and filter to popular ones
+    const popularThemeIds = [
+        1, // Technic
+        158, // Star Wars
+        246, // Harry Potter
+        252, // Architecture
+        435, // Speed Champions
+        494, // Creator Expert
+        577, // Ideas
+        602, // Creator 3-in-1
+        608, // City
+        610, // Ninjago
+        621, // Super Heroes
+        695, // Icons
+    ];
+    
+    return data.results
+        .filter(t => popularThemeIds.includes(t.id) || t.parent_id === null)
+        .map(t => ({
+            id: t.id,
+            name: t.name,
+            parentId: t.parent_id
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Get sets by theme
+ */
+export async function getSetsByTheme(themeId, page = 1, pageSize = 20) {
+    const url = `${BASE_URL}/lego/sets/?theme_id=${themeId}&min_parts=50&ordering=-year,-num_parts&page=${page}&page_size=${pageSize}`;
     
     const response = await fetch(url, {
         headers: { 'Authorization': `key ${API_KEY}` }
