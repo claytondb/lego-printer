@@ -25,18 +25,14 @@
                 <div class="divider">or</div>
                 
                 <button id="catalogBtn" class="catalog-btn">
-                    <span class="catalog-icon">📚</span>
-                    Browse Set Catalog
+                    <span class="catalog-icon">🔍</span>
+                    Search Official Sets
                 </button>
             </div>
             
-            <div class="sample-designs">
-                <p>Don't have a file? Try a sample:</p>
-                <div class="sample-buttons">
-                    <button class="sample-btn" data-sample="car">🚗 Car</button>
-                    <button class="sample-btn" data-sample="house">🏠 House</button>
-                    <button class="sample-btn" data-sample="robot">🤖 Robot</button>
-                </div>
+            <div class="inventory-bar">
+                <span id="inventoryStats">📦 Inventory: 0 parts</span>
+                <button id="manageInventory" class="small-btn">Manage</button>
             </div>
         </section>
 
@@ -46,6 +42,7 @@
                 <div class="workspace-actions">
                     <button id="selectAll">Select All</button>
                     <button id="selectNone">Select None</button>
+                    <button id="selectNeed" class="accent" title="Select only parts you don't have">Select Need</button>
                     <button id="exportSTL" class="primary">Export STL</button>
                 </div>
             </div>
@@ -74,10 +71,14 @@
                     
                     <div class="parts-toolbar">
                         <input type="text" id="searchParts" placeholder="Search parts...">
+                        <select id="filterColor">
+                            <option value="">All Colors</option>
+                        </select>
                         <select id="sortParts">
-                            <option value="quantity">Sort by Quantity</option>
-                            <option value="name">Sort by Name</option>
-                            <option value="color">Sort by Color</option>
+                            <option value="quantity">By Qty</option>
+                            <option value="name">By Name</option>
+                            <option value="color">By Color</option>
+                            <option value="owned">By Owned</option>
                         </select>
                     </div>
 
@@ -87,29 +88,56 @@
         </section>
     </div>
 
-    <!-- Catalog Modal -->
+    <!-- Catalog Modal (Rebrickable Search) -->
     <div id="catalogModal" class="modal">
         <div class="modal-content catalog-modal">
             <div class="modal-header">
-                <h2>📚 Set Catalog</h2>
+                <h2>🔍 Search Official Sets</h2>
                 <button id="closeCatalog" class="close-btn">&times;</button>
             </div>
             
-            <div class="catalog-filters">
-                <input type="text" id="catalogSearch" placeholder="Search sets...">
-                <select id="categoryFilter">
-                    <option value="">All Categories</option>
-                    <option value="vehicles">🚗 Vehicles</option>
-                    <option value="buildings">🏠 Buildings</option>
-                    <option value="space">🚀 Space</option>
-                    <option value="figures">🤖 Figures</option>
-                    <option value="animals">🦆 Animals</option>
-                    <option value="nature">🌳 Nature</option>
-                    <option value="decorative">❤️ Decorative</option>
-                </select>
+            <div class="catalog-search-bar">
+                <input type="text" id="rebrickableSearch" placeholder="Search by name or set number (e.g. 'Millennium Falcon' or '75192')">
+                <button id="searchBtn" class="primary">Search</button>
             </div>
             
-            <div id="catalogGrid" class="catalog-grid"></div>
+            <div id="searchResults" class="catalog-grid">
+                <div class="search-hint">
+                    <p>🔍 Search for any official LEGO set</p>
+                    <p class="hint-sub">Powered by Rebrickable database</p>
+                </div>
+            </div>
+            
+            <div id="searchPagination" class="pagination" style="display: none;">
+                <button id="prevPage" disabled>← Previous</button>
+                <span id="pageInfo">Page 1</span>
+                <button id="nextPage">Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory Modal -->
+    <div id="inventoryModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📦 Your Inventory</h2>
+                <button id="closeInventory" class="close-btn">&times;</button>
+            </div>
+            
+            <div class="inventory-stats-detail">
+                <p><strong id="invUniqueParts">0</strong> unique parts</p>
+                <p><strong id="invTotalPieces">0</strong> total pieces</p>
+            </div>
+            
+            <div class="inventory-actions">
+                <button id="importInventory">📥 Import from Set</button>
+                <button id="exportInventoryBtn">📤 Export</button>
+                <button id="clearInventory" class="danger">🗑️ Clear All</button>
+            </div>
+            
+            <div class="inventory-tip">
+                <p>💡 Click the ✓ button on any part to mark it as owned</p>
+            </div>
         </div>
     </div>
 

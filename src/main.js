@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { LDRAW_COLORS } from './ldraw-colors.js';
-import { SET_CATALOG } from './set-catalog.js';
 import { getPartGeometry, preloadCommonParts, getCacheStats } from './part-loader.js';
+import { searchSets, getSetParts, getSetDetails, rebrickableToLDrawColor } from './rebrickable.js';
+import { loadInventory, saveInventory, getOwnedQuantity, setOwnedPart, getInventoryStats, clearInventory } from './inventory.js';
 
 // App State
 const state = {
@@ -18,7 +19,11 @@ const state = {
     partsGroup: null,       // Group for laid-out parts
     viewMode: 'built',      // 'built' or 'parts'
     currentModelName: '',
-    rawLdrContent: null     // Store raw LDR for parsing
+    rawLdrContent: null,    // Store raw LDR for parsing
+    colorFilter: '',        // Current color filter
+    searchPage: 1,          // Rebrickable search page
+    searchQuery: '',        // Current search query
+    searchResults: null     // Cached search results
 };
 
 // Initialize
@@ -28,8 +33,9 @@ async function init() {
     setupUpload();
     setupWorkspace();
     setupModal();
-    setupCatalog();
-    setupSamples();
+    setupRebrickableSearch();
+    setupInventoryUI();
+    updateInventoryDisplay();
     
     // Preload common parts in background
     preloadCommonParts().then(() => {
@@ -38,15 +44,208 @@ async function init() {
     });
 }
 
-// Sample Designs
-function setupSamples() {
-    document.querySelectorAll('.sample-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const sampleMap = { car: 'simple-car', house: 'mini-house', robot: 'robot' };
-            const setId = sampleMap[btn.dataset.sample];
-            if (setId) loadCatalogSet(setId);
-        });
+// Rebrickable Search
+function setupRebrickableSearch() {
+    const modal = document.getElementById('catalogModal');
+    const searchInput = document.getElementById('rebrickableSearch');
+    const searchBtn = document.getElementById('searchBtn');
+    const resultsGrid = document.getElementById('searchResults');
+    
+    document.getElementById('catalogBtn').addEventListener('click', () => {
+        modal.style.display = 'flex';
     });
+    
+    document.getElementById('closeCatalog').addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.style.display = 'none';
+    });
+    
+    // Search on button click or Enter
+    searchBtn.addEventListener('click', () => performSearch());
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') performSearch();
+    });
+    
+    // Pagination
+    document.getElementById('prevPage').addEventListener('click', () => {
+        if (state.searchPage > 1) {
+            state.searchPage--;
+            performSearch(false);
+        }
+    });
+    
+    document.getElementById('nextPage').addEventListener('click', () => {
+        state.searchPage++;
+        performSearch(false);
+    });
+}
+
+async function performSearch(resetPage = true) {
+    const query = document.getElementById('rebrickableSearch').value.trim();
+    if (!query) return;
+    
+    if (resetPage) state.searchPage = 1;
+    state.searchQuery = query;
+    
+    const resultsGrid = document.getElementById('searchResults');
+    resultsGrid.innerHTML = '<div class="search-hint"><div class="loading-spinner"></div><p>Searching...</p></div>';
+    
+    try {
+        const results = await searchSets(query, state.searchPage, 12);
+        state.searchResults = results;
+        
+        if (results.sets.length === 0) {
+            resultsGrid.innerHTML = '<div class="search-hint"><p>No sets found for "' + query + '"</p></div>';
+            document.getElementById('searchPagination').style.display = 'none';
+            return;
+        }
+        
+        resultsGrid.innerHTML = results.sets.map(set => `
+            <div class="catalog-item" data-set-num="${set.id}">
+                <div class="catalog-thumb">
+                    ${set.image ? `<img src="${set.image}" alt="${set.name}">` : '<span class="emoji-thumb">🧱</span>'}
+                </div>
+                <div class="catalog-info">
+                    <div class="catalog-name">${set.name}</div>
+                    <div class="catalog-meta">
+                        <span>#${set.number}</span>
+                        <span>${set.pieces} pcs</span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        
+        // Click handlers
+        resultsGrid.querySelectorAll('.catalog-item').forEach(item => {
+            item.addEventListener('click', () => loadRebrickableSet(item.dataset.setNum));
+        });
+        
+        // Pagination
+        const totalPages = Math.ceil(results.count / 12);
+        document.getElementById('searchPagination').style.display = 'flex';
+        document.getElementById('pageInfo').textContent = `Page ${state.searchPage} of ${totalPages}`;
+        document.getElementById('prevPage').disabled = state.searchPage <= 1;
+        document.getElementById('nextPage').disabled = state.searchPage >= totalPages;
+        
+    } catch (error) {
+        console.error('Search error:', error);
+        resultsGrid.innerHTML = '<div class="search-hint"><p>Search failed. Please try again.</p></div>';
+    }
+}
+
+async function loadRebrickableSet(setNum) {
+    document.getElementById('catalogModal').style.display = 'none';
+    showLoading(`Loading set ${setNum}...`);
+    
+    try {
+        const [setDetails, parts] = await Promise.all([
+            getSetDetails(setNum),
+            getSetParts(setNum)
+        ]);
+        
+        state.currentModelName = setDetails.name;
+        state.parts = parts.filter(p => !p.isSpare).map(p => ({
+            id: p.id,
+            name: p.name,
+            color: rebrickableToLDrawColor(p.color),
+            colorName: p.colorName,
+            colorHex: p.colorHex,
+            quantity: p.quantity,
+            image: p.image
+        }));
+        state.partInstances = [];
+        state.builtGroup = null;
+        
+        // Select all by default
+        state.selectedParts = new Set(state.parts.map((_, i) => i));
+        
+        hideLoading();
+        showWorkspace(setDetails.name);
+        populateColorFilter();
+        renderPartsList();
+        init3DPreview();
+        
+    } catch (error) {
+        hideLoading();
+        console.error('Failed to load set:', error);
+        alert('Failed to load set: ' + error.message);
+    }
+}
+
+// Inventory UI
+function setupInventoryUI() {
+    const modal = document.getElementById('inventoryModal');
+    
+    document.getElementById('manageInventory').addEventListener('click', () => {
+        updateInventoryModal();
+        modal.style.display = 'flex';
+    });
+    
+    document.getElementById('closeInventory').addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.style.display = 'none';
+    });
+    
+    document.getElementById('clearInventory').addEventListener('click', () => {
+        if (confirm('Clear all inventory? This cannot be undone.')) {
+            clearInventory();
+            updateInventoryDisplay();
+            updateInventoryModal();
+            renderPartsList();
+        }
+    });
+    
+    document.getElementById('importInventory').addEventListener('click', () => {
+        alert('Load a set first, then click the ✓ button on each part to add it to your inventory.');
+    });
+    
+    document.getElementById('exportInventoryBtn').addEventListener('click', () => {
+        const inventory = loadInventory();
+        const blob = new Blob([JSON.stringify(inventory, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'lego-inventory.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+}
+
+function updateInventoryDisplay() {
+    const stats = getInventoryStats();
+    document.getElementById('inventoryStats').textContent = 
+        `📦 Inventory: ${stats.uniqueParts} parts (${stats.totalPieces} pieces)`;
+}
+
+function updateInventoryModal() {
+    const stats = getInventoryStats();
+    document.getElementById('invUniqueParts').textContent = stats.uniqueParts;
+    document.getElementById('invTotalPieces').textContent = stats.totalPieces;
+}
+
+function populateColorFilter() {
+    const select = document.getElementById('filterColor');
+    const colors = new Map();
+    
+    for (const part of state.parts) {
+        if (!colors.has(part.colorName)) {
+            colors.set(part.colorName, part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888');
+        }
+    }
+    
+    // Sort by name
+    const sorted = [...colors.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    
+    select.innerHTML = '<option value="">All Colors</option>' + 
+        sorted.map(([name, hex]) => 
+            `<option value="${name}" style="color: ${hex}">● ${name}</option>`
+        ).join('');
 }
 
 // File Upload
@@ -367,87 +566,6 @@ function getPartName(partId) {
     return names[partId] || `Part ${partId}`;
 }
 
-// Set Catalog
-function setupCatalog() {
-    const catalogBtn = document.getElementById('catalogBtn');
-    const catalogModal = document.getElementById('catalogModal');
-    const catalogGrid = document.getElementById('catalogGrid');
-    const catalogSearch = document.getElementById('catalogSearch');
-    const categoryFilter = document.getElementById('categoryFilter');
-    
-    catalogBtn.addEventListener('click', () => {
-        catalogModal.style.display = 'flex';
-        renderCatalog();
-    });
-    
-    catalogModal.addEventListener('click', (e) => {
-        if (e.target === catalogModal) {
-            catalogModal.style.display = 'none';
-        }
-    });
-    
-    document.getElementById('closeCatalog').addEventListener('click', () => {
-        catalogModal.style.display = 'none';
-    });
-    
-    catalogSearch.addEventListener('input', renderCatalog);
-    categoryFilter.addEventListener('change', renderCatalog);
-}
-
-function renderCatalog() {
-    const grid = document.getElementById('catalogGrid');
-    const search = document.getElementById('catalogSearch').value.toLowerCase();
-    const category = document.getElementById('categoryFilter').value;
-    
-    let sets = SET_CATALOG;
-    
-    if (search) {
-        sets = sets.filter(s => 
-            s.name.toLowerCase().includes(search) ||
-            s.number.includes(search)
-        );
-    }
-    
-    if (category) {
-        sets = sets.filter(s => s.category === category);
-    }
-    
-    grid.innerHTML = sets.map(set => `
-        <div class="catalog-item" data-set="${set.id}">
-            <div class="catalog-thumb">${set.icon || '🧱'}</div>
-            <div class="catalog-info">
-                <div class="catalog-name">${set.name}</div>
-                <div class="catalog-number">#${set.number} • ${set.pieces} pcs</div>
-            </div>
-        </div>
-    `).join('');
-    
-    grid.querySelectorAll('.catalog-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const setId = item.dataset.set;
-            loadCatalogSet(setId);
-        });
-    });
-}
-
-async function loadCatalogSet(setId) {
-    const set = SET_CATALOG.find(s => s.id === setId);
-    if (!set) return;
-    
-    document.getElementById('catalogModal').style.display = 'none';
-    showLoading(`Loading ${set.name}...`);
-    
-    try {
-        // Load the embedded LDR data
-        state.rawLdrContent = set.ldr;
-        state.currentModelName = set.name;
-        await loadLDrawModel(set.ldr, set.name + '.ldr');
-    } catch (error) {
-        hideLoading();
-        alert('Failed to load set: ' + error.message);
-    }
-}
-
 // Workspace
 function setupWorkspace() {
     document.getElementById('selectAll').addEventListener('click', () => {
@@ -461,11 +579,30 @@ function setupWorkspace() {
         renderPartsList();
         updatePreview();
     });
+    
+    // Select only parts user doesn't have enough of
+    document.getElementById('selectNeed').addEventListener('click', () => {
+        state.selectedParts.clear();
+        state.parts.forEach((part, index) => {
+            const owned = getOwnedQuantity(part.id, part.color);
+            if (owned < part.quantity) {
+                state.selectedParts.add(index);
+            }
+        });
+        renderPartsList();
+        updatePreview();
+    });
 
     document.getElementById('exportSTL').addEventListener('click', showExportModal);
 
     document.getElementById('searchParts').addEventListener('input', (e) => {
         renderPartsList(e.target.value);
+    });
+    
+    // Color filter
+    document.getElementById('filterColor').addEventListener('change', (e) => {
+        state.colorFilter = e.target.value;
+        renderPartsList();
     });
 
     document.getElementById('sortParts').addEventListener('change', () => {
@@ -517,11 +654,17 @@ function hideLoading() {
 function renderPartsList(filter = '') {
     const container = document.getElementById('partsList');
     const sortBy = document.getElementById('sortParts').value;
+    const textFilter = filter || document.getElementById('searchParts').value;
     
-    let parts = state.parts.map((part, index) => ({ ...part, index }));
+    let parts = state.parts.map((part, index) => ({ 
+        ...part, 
+        index,
+        owned: getOwnedQuantity(part.id, part.color)
+    }));
     
-    if (filter) {
-        const lowerFilter = filter.toLowerCase();
+    // Text filter
+    if (textFilter) {
+        const lowerFilter = textFilter.toLowerCase();
         parts = parts.filter(p => 
             p.name.toLowerCase().includes(lowerFilter) ||
             p.id.toLowerCase().includes(lowerFilter) ||
@@ -529,40 +672,84 @@ function renderPartsList(filter = '') {
         );
     }
     
+    // Color filter
+    if (state.colorFilter) {
+        parts = parts.filter(p => p.colorName === state.colorFilter);
+    }
+    
+    // Sort
     parts.sort((a, b) => {
         switch (sortBy) {
             case 'quantity': return b.quantity - a.quantity;
             case 'name': return a.name.localeCompare(b.name);
             case 'color': return a.colorName.localeCompare(b.colorName);
+            case 'owned': return b.owned - a.owned;
             default: return 0;
         }
     });
     
     container.innerHTML = parts.map(part => {
         const isSelected = state.selectedParts.has(part.index);
-        const color = LDRAW_COLORS[part.color] || { hex: '#888888' };
+        const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
+        const hasEnough = part.owned >= part.quantity;
+        const need = Math.max(0, part.quantity - part.owned);
         
         return `
-            <div class="part-item ${isSelected ? 'selected' : ''}" data-index="${part.index}">
+            <div class="part-item ${isSelected ? 'selected' : ''} ${hasEnough ? 'have-enough' : ''}" data-index="${part.index}">
                 <input type="checkbox" class="part-checkbox" ${isSelected ? 'checked' : ''}>
-                <div class="part-color-dot" style="background: ${color.hex}"></div>
+                <div class="part-color-dot" style="background: ${colorHex}"></div>
                 <div class="part-info">
                     <div class="part-name">${part.name}</div>
-                    <div class="part-details">${part.colorName} • #${part.id}</div>
+                    <div class="part-details">
+                        ${part.colorName} • #${part.id}
+                        ${part.owned > 0 ? `<span class="part-owned-qty">✓ Own ${part.owned}</span>` : ''}
+                    </div>
                 </div>
-                <div class="part-quantity">×${part.quantity}</div>
+                <div class="part-quantity">
+                    ${hasEnough ? `<span class="have-all">✓</span>` : `×${need}`}
+                </div>
+                <button class="part-owned-btn ${part.owned > 0 ? 'owned' : ''}" 
+                        data-part-id="${part.id}" 
+                        data-color="${part.color}"
+                        data-qty="${part.quantity}"
+                        title="Mark as owned">
+                    ${part.owned > 0 ? '✓' : '+'}
+                </button>
             </div>
         `;
     }).join('');
     
+    // Event handlers
     container.querySelectorAll('.part-item').forEach(item => {
         item.addEventListener('click', (e) => {
-            if (e.target.type === 'checkbox') return;
+            if (e.target.type === 'checkbox' || e.target.classList.contains('part-owned-btn')) return;
             togglePart(parseInt(item.dataset.index));
         });
         
         item.querySelector('.part-checkbox').addEventListener('change', (e) => {
             togglePart(parseInt(item.dataset.index), e.target.checked);
+        });
+    });
+    
+    // Owned button handlers
+    container.querySelectorAll('.part-owned-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const partId = btn.dataset.partId;
+            const color = parseInt(btn.dataset.color);
+            const qty = parseInt(btn.dataset.qty);
+            const currentOwned = getOwnedQuantity(partId, color);
+            
+            if (currentOwned > 0) {
+                // Toggle off
+                setOwnedPart(partId, color, 0);
+            } else {
+                // Set owned to quantity needed
+                setOwnedPart(partId, color, qty);
+            }
+            
+            updateInventoryDisplay();
+            renderPartsList();
         });
     });
     
