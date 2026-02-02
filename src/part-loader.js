@@ -150,14 +150,266 @@ function createBundledGeometry(partId, def) {
     const height = def.plate ? PLATE_H : (def.tile ? 4 : heightUnits * PLATE_H);
     
     try {
-        // Just use a simple box - mergeGeometries causes issues
-        const bodyGeo = new THREE.BoxGeometry(width * 0.95, height, depth * 0.95);
-        bodyGeo.translate(0, height / 2, 0);
-        return bodyGeo;
+        if (def.tile) {
+            // Tiles - flat with no studs
+            return createTileGeometry(width, depth);
+        } else if (def.round || def.cone) {
+            // Round parts
+            return createRoundGeometry(width, height, def.cone);
+        } else if (def.slope) {
+            // Slopes
+            return createSlopeGeometry(width, height, depth);
+        } else {
+            // Standard brick/plate with studs
+            return createBrickGeometry(width, height, depth, studsX, studsZ);
+        }
     } catch (e) {
         console.warn('Failed to create geometry for', partId, e);
-        return new THREE.BoxGeometry(20, 24, 20);
+        return createSimpleBox(width, height, depth);
     }
+}
+
+/**
+ * Create brick geometry with studs
+ */
+function createBrickGeometry(width, height, depth, studsX, studsZ) {
+    const STUD = 20;
+    const STUD_RADIUS = 6;
+    const STUD_HEIGHT = 4;
+    const STUD_SEGMENTS = 12;
+    
+    const vertices = [];
+    const indices = [];
+    let vertexOffset = 0;
+    
+    // Main body (box)
+    const hw = width * 0.48;  // half width with small gap
+    const hh = height / 2;
+    const hd = depth * 0.48;
+    
+    // Box vertices (8 corners)
+    const boxVerts = [
+        [-hw, 0, -hd], [hw, 0, -hd], [hw, 0, hd], [-hw, 0, hd],  // bottom
+        [-hw, height, -hd], [hw, height, -hd], [hw, height, hd], [-hw, height, hd]  // top
+    ];
+    
+    for (const v of boxVerts) {
+        vertices.push(...v);
+    }
+    
+    // Box faces (6 faces, 2 triangles each)
+    const boxIndices = [
+        0,1,2, 0,2,3,  // bottom
+        4,6,5, 4,7,6,  // top
+        0,4,5, 0,5,1,  // front
+        2,6,7, 2,7,3,  // back
+        0,3,7, 0,7,4,  // left
+        1,5,6, 1,6,2   // right
+    ];
+    indices.push(...boxIndices);
+    vertexOffset = 8;
+    
+    // Add studs
+    for (let sx = 0; sx < studsX; sx++) {
+        for (let sz = 0; sz < studsZ; sz++) {
+            const cx = (sx - (studsX - 1) / 2) * STUD;
+            const cz = (sz - (studsZ - 1) / 2) * STUD;
+            const baseY = height;
+            
+            // Stud cylinder vertices
+            const studVerts = createCylinderVertices(cx, baseY, cz, STUD_RADIUS, STUD_HEIGHT, STUD_SEGMENTS);
+            for (const v of studVerts.vertices) {
+                vertices.push(...v);
+            }
+            
+            // Stud indices (offset by current vertex count)
+            for (const idx of studVerts.indices) {
+                indices.push(idx + vertexOffset);
+            }
+            vertexOffset += studVerts.vertices.length;
+        }
+    }
+    
+    return createBufferGeometry(vertices, indices);
+}
+
+/**
+ * Create cylinder vertices for studs
+ */
+function createCylinderVertices(cx, baseY, cz, radius, height, segments) {
+    const vertices = [];
+    const indices = [];
+    
+    // Bottom center
+    vertices.push([cx, baseY, cz]);
+    // Top center
+    vertices.push([cx, baseY + height, cz]);
+    
+    // Bottom and top ring
+    for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = cx + Math.cos(angle) * radius;
+        const z = cz + Math.sin(angle) * radius;
+        vertices.push([x, baseY, z]);         // bottom ring
+        vertices.push([x, baseY + height, z]); // top ring
+    }
+    
+    // Indices for bottom cap
+    for (let i = 0; i < segments; i++) {
+        const curr = 2 + i * 2;
+        const next = 2 + ((i + 1) % segments) * 2;
+        indices.push(0, next, curr);
+    }
+    
+    // Indices for top cap
+    for (let i = 0; i < segments; i++) {
+        const curr = 3 + i * 2;
+        const next = 3 + ((i + 1) % segments) * 2;
+        indices.push(1, curr, next);
+    }
+    
+    // Indices for sides
+    for (let i = 0; i < segments; i++) {
+        const bl = 2 + i * 2;
+        const br = 2 + ((i + 1) % segments) * 2;
+        const tl = bl + 1;
+        const tr = br + 1;
+        indices.push(bl, br, tr);
+        indices.push(bl, tr, tl);
+    }
+    
+    return { vertices, indices };
+}
+
+/**
+ * Create tile geometry (flat, no studs)
+ */
+function createTileGeometry(width, depth) {
+    const height = 4;
+    const hw = width * 0.48;
+    const hd = depth * 0.48;
+    
+    const vertices = [
+        [-hw, 0, -hd], [hw, 0, -hd], [hw, 0, hd], [-hw, 0, hd],
+        [-hw, height, -hd], [hw, height, -hd], [hw, height, hd], [-hw, height, hd]
+    ];
+    
+    const indices = [
+        0,1,2, 0,2,3,
+        4,6,5, 4,7,6,
+        0,4,5, 0,5,1,
+        2,6,7, 2,7,3,
+        0,3,7, 0,7,4,
+        1,5,6, 1,6,2
+    ];
+    
+    return createBufferGeometry(vertices.map(v => [...v]), indices);
+}
+
+/**
+ * Create round brick/cone geometry
+ */
+function createRoundGeometry(width, height, isCone) {
+    const radius = width / 2 * 0.9;
+    const segments = 16;
+    const vertices = [];
+    const indices = [];
+    
+    // Bottom center
+    vertices.push([0, 0, 0]);
+    // Top center
+    vertices.push([0, height, 0]);
+    
+    // Bottom and top rings
+    for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        vertices.push([x, 0, z]);
+        vertices.push([x * (isCone ? 0.1 : 1), height, z * (isCone ? 0.1 : 1)]);
+    }
+    
+    // Bottom cap
+    for (let i = 0; i < segments; i++) {
+        const curr = 2 + i * 2;
+        const next = 2 + ((i + 1) % segments) * 2;
+        indices.push(0, next, curr);
+    }
+    
+    // Top cap
+    for (let i = 0; i < segments; i++) {
+        const curr = 3 + i * 2;
+        const next = 3 + ((i + 1) % segments) * 2;
+        indices.push(1, curr, next);
+    }
+    
+    // Sides
+    for (let i = 0; i < segments; i++) {
+        const bl = 2 + i * 2;
+        const br = 2 + ((i + 1) % segments) * 2;
+        const tl = bl + 1;
+        const tr = br + 1;
+        indices.push(bl, br, tr);
+        indices.push(bl, tr, tl);
+    }
+    
+    return createBufferGeometry(vertices, indices);
+}
+
+/**
+ * Create slope geometry
+ */
+function createSlopeGeometry(width, height, depth) {
+    const hw = width * 0.48;
+    const hd = depth * 0.48;
+    
+    // Slope vertices - angled top
+    const vertices = [
+        // Bottom
+        [-hw, 0, -hd], [hw, 0, -hd], [hw, 0, hd], [-hw, 0, hd],
+        // Top (sloped - back is higher)
+        [-hw, height * 0.2, -hd], [hw, height * 0.2, -hd], 
+        [hw, height, hd], [-hw, height, hd]
+    ];
+    
+    const indices = [
+        0,1,2, 0,2,3,  // bottom
+        4,6,5, 4,7,6,  // top (sloped)
+        0,4,5, 0,5,1,  // front
+        2,6,7, 2,7,3,  // back
+        0,3,7, 0,7,4,  // left
+        1,5,6, 1,6,2   // right
+    ];
+    
+    return createBufferGeometry(vertices.map(v => [...v]), indices);
+}
+
+/**
+ * Create simple box geometry (fallback)
+ */
+function createSimpleBox(width, height, depth) {
+    const geo = new THREE.BoxGeometry(width * 0.95, height, depth * 0.95);
+    geo.translate(0, height / 2, 0);
+    return geo;
+}
+
+/**
+ * Create BufferGeometry from vertices and indices
+ */
+function createBufferGeometry(vertices, indices) {
+    const positions = new Float32Array(vertices.length * 3);
+    for (let i = 0; i < vertices.length; i++) {
+        positions[i * 3] = vertices[i][0];
+        positions[i * 3 + 1] = vertices[i][1];
+        positions[i * 3 + 2] = vertices[i][2];
+    }
+    
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    
+    return geometry;
 }
 
 /**
@@ -173,13 +425,11 @@ function createFallbackGeometry(partId) {
     const height = dims.h * 8;
     
     try {
-        // Simple box geometry - avoid mergeGeometries issues
-        const body = new THREE.BoxGeometry(dims.x * STUD * 0.95, height, dims.z * STUD * 0.95);
-        body.translate(0, height / 2, 0);
-        return body;
+        // Create proper brick with studs
+        return createBrickGeometry(dims.x * STUD, height, dims.z * STUD, dims.x, dims.z);
     } catch (e) {
         console.warn('Failed to create fallback geometry for', partId, e);
-        return new THREE.BoxGeometry(20, 24, 20);
+        return createSimpleBox(dims.x * STUD, height, dims.z * STUD);
     }
 }
 
