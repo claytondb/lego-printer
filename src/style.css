@@ -46,6 +46,24 @@ header p {
     font-size: 1.1rem;
 }
 
+.install-btn {
+    margin-top: 12px;
+    padding: 10px 20px;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: #000;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.install-btn:hover {
+    background: var(--accent-hover);
+    transform: scale(1.02);
+}
+
 /* Upload Section */
 .upload-section {
     max-width: 700px;
@@ -300,6 +318,46 @@ header p {
     color: var(--accent);
 }
 
+.price-comparison {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.price-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.price-item strong {
+    color: var(--text-primary);
+}
+
+.print-price strong {
+    color: var(--success);
+}
+
+.vs {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.savings {
+    margin-left: auto;
+    padding: 4px 8px;
+    background: var(--success);
+    color: #000;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
 .stat-divider {
     margin: 0 8px;
 }
@@ -363,12 +421,36 @@ header p {
     cursor: pointer;
 }
 
-.part-color-dot {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    border: 2px solid rgba(255,255,255,0.2);
+.part-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    border: 2px solid rgba(255,255,255,0.1);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.part-thumb img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.part-thumb .part-icon {
+    font-size: 1.5rem;
+    opacity: 0.7;
+}
+
+.part-color-badge {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
 }
 
 .part-info {
@@ -757,6 +839,38 @@ header p {
     width: 18px;
     height: 18px;
     accent-color: var(--accent);
+}
+
+.export-type-toggle {
+    display: flex;
+    gap: 10px;
+}
+
+.toggle-option {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.toggle-option:has(input:checked) {
+    border-color: var(--accent);
+    background: rgba(247, 215, 49, 0.1);
+}
+
+.toggle-option input {
+    display: none;
+}
+
+.toggle-option span {
+    font-size: 0.95rem;
 }
 
 .option-hint {

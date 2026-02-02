@@ -8,10 +8,16 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "keywords": ["lego", "3d-printing", "stl", "ldraw"],
+  "keywords": [
+    "lego",
+    "3d-printing",
+    "stl",
+    "ldraw"
+  ],
   "author": "claytondb",
   "license": "MIT",
   "dependencies": {
+    "jszip": "^3.10.1",
     "three": "^0.182.0",
     "vite": "^7.3.1"
   }

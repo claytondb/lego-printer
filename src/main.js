@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import JSZip from 'jszip';
 import { LDRAW_COLORS } from './ldraw-colors.js';
 import { getPartGeometry, preloadCommonParts, getCacheStats } from './part-loader.js';
 import { searchSets, getSetParts, getSetDetails, rebrickableToLDrawColor } from './rebrickable.js';
 import { loadInventory, saveInventory, getOwnedQuantity, setOwnedPart, getInventoryStats, clearInventory } from './inventory.js';
+import { calculateTotalCost, estimate3DPrintCost, formatPrice, getBrickLinkUrl } from './bricklink.js';
 
 // App State
 const state = {
@@ -36,11 +38,38 @@ async function init() {
     setupRebrickableSearch();
     setupInventoryUI();
     updateInventoryDisplay();
+    setupPWAInstall();
     
     // Preload common parts in background
     preloadCommonParts().then(() => {
         const stats = getCacheStats();
         console.log(`Part cache ready: ${stats.bundled} bundled, ${stats.cached} cached`);
+    });
+}
+
+// PWA Install Prompt
+let deferredPrompt;
+function setupPWAInstall() {
+    const installBtn = document.getElementById('installBtn');
+    
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        installBtn.style.display = 'inline-block';
+    });
+    
+    installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log('Install outcome:', outcome);
+        deferredPrompt = null;
+        installBtn.style.display = 'none';
+    });
+    
+    window.addEventListener('appinstalled', () => {
+        console.log('App installed');
+        installBtn.style.display = 'none';
     });
 }
 
@@ -697,10 +726,13 @@ function renderPartsList(filter = '') {
         return `
             <div class="part-item ${isSelected ? 'selected' : ''} ${hasEnough ? 'have-enough' : ''}" data-index="${part.index}">
                 <input type="checkbox" class="part-checkbox" ${isSelected ? 'checked' : ''}>
-                <div class="part-color-dot" style="background: ${colorHex}"></div>
+                <div class="part-thumb" style="background-color: ${colorHex}">
+                    ${part.image ? `<img src="${part.image}" alt="${part.name}" loading="lazy">` : `<span class="part-icon">🧱</span>`}
+                </div>
                 <div class="part-info">
                     <div class="part-name">${part.name}</div>
                     <div class="part-details">
+                        <span class="part-color-badge" style="background: ${colorHex}"></span>
                         ${part.colorName} • #${part.id}
                         ${part.owned > 0 ? `<span class="part-owned-qty">✓ Own ${part.owned}</span>` : ''}
                     </div>
@@ -775,13 +807,31 @@ function updateCounts() {
     const totalUnique = state.parts.length;
     const selectedUnique = state.selectedParts.size;
     const totalPieces = state.parts.reduce((sum, p) => sum + p.quantity, 0);
-    const selectedPieces = Array.from(state.selectedParts).reduce((sum, i) => 
-        sum + state.parts[i].quantity, 0);
+    const selectedParts = Array.from(state.selectedParts).map(i => state.parts[i]);
+    const selectedPieces = selectedParts.reduce((sum, p) => sum + p.quantity, 0);
     
     document.getElementById('totalCount').textContent = totalUnique;
     document.getElementById('selectedCount').textContent = selectedUnique;
     document.getElementById('totalPieces').textContent = totalPieces;
     document.getElementById('selectedPieces').textContent = selectedPieces;
+    
+    // Calculate prices
+    const buyPrice = calculateTotalCost(selectedParts);
+    const printPrice = estimate3DPrintCost(selectedParts);
+    
+    document.getElementById('buyPrice').textContent = formatPrice(buyPrice);
+    document.getElementById('printPrice').textContent = formatPrice(printPrice);
+    
+    // Show savings
+    const savingsEl = document.getElementById('savingsText');
+    if (buyPrice > 0 && printPrice < buyPrice) {
+        const savings = buyPrice - printPrice;
+        const pct = Math.round((savings / buyPrice) * 100);
+        savingsEl.textContent = `Save ${pct}%`;
+        savingsEl.style.display = 'block';
+    } else {
+        savingsEl.style.display = 'none';
+    }
 }
 
 // 3D Preview
@@ -935,6 +985,7 @@ function hideExportModal() {
 async function performExport() {
     const scale = parseFloat(document.getElementById('exportScale').value) || 1;
     const hollow = document.getElementById('hollowParts').checked;
+    const exportType = document.querySelector('input[name="exportType"]:checked').value;
     
     showLoading('Generating STL...');
     
@@ -954,39 +1005,82 @@ async function performExport() {
             selectedParts.map(part => getPartGeometry(part.id))
         );
         
-        showLoading('Building STL...');
-        
-        // Position and scale geometries
-        const geometries = [];
-        const spacing = 50;
-        const cols = Math.ceil(Math.sqrt(selectedIndices.length));
-        
-        loadedGeometries.forEach((geo, index) => {
-            const clonedGeo = geo.clone();
-            const row = Math.floor(index / cols);
-            const col = index % cols;
+        if (exportType === 'individual') {
+            // Export as ZIP with individual files
+            showLoading('Creating ZIP file...');
+            const zip = new JSZip();
+            const folder = zip.folder(state.currentModelName || 'lego-parts');
             
-            clonedGeo.translate(
-                col * spacing * scale,
-                0,
-                row * spacing * scale
-            );
+            for (let i = 0; i < selectedParts.length; i++) {
+                const part = selectedParts[i];
+                const geo = loadedGeometries[i].clone();
+                geo.scale(scale, scale, scale);
+                
+                const stlData = exportToSTL(geo);
+                const filename = `${part.id}_${part.colorName.replace(/\s+/g, '-')}_x${part.quantity}.stl`;
+                folder.file(filename, stlData);
+                
+                showLoading(`Adding ${i + 1}/${selectedParts.length}...`);
+            }
             
-            clonedGeo.scale(scale, scale, scale);
-            geometries.push(clonedGeo);
-        });
+            // Also add a manifest
+            const manifest = selectedParts.map(p => ({
+                part_id: p.id,
+                name: p.name,
+                color: p.colorName,
+                quantity: p.quantity
+            }));
+            folder.file('manifest.json', JSON.stringify(manifest, null, 2));
+            
+            showLoading('Compressing ZIP...');
+            const content = await zip.generateAsync({ type: 'blob' });
+            downloadBlob(content, `${state.currentModelName || 'lego-parts'}.zip`);
+            
+        } else {
+            // Export as single combined STL
+            showLoading('Building STL...');
+            
+            const geometries = [];
+            const spacing = 50;
+            const cols = Math.ceil(Math.sqrt(selectedIndices.length));
+            
+            loadedGeometries.forEach((geo, index) => {
+                const clonedGeo = geo.clone();
+                const row = Math.floor(index / cols);
+                const col = index % cols;
+                
+                clonedGeo.translate(
+                    col * spacing * scale,
+                    0,
+                    row * spacing * scale
+                );
+                
+                clonedGeo.scale(scale, scale, scale);
+                geometries.push(clonedGeo);
+            });
+            
+            const mergedGeometry = mergeGeometries(geometries);
+            const stlData = exportToSTL(mergedGeometry);
+            downloadFile(stlData, `${state.currentModelName || 'lego-parts'}.stl`);
+        }
         
-        const mergedGeometry = mergeGeometries(geometries);
-        const stlData = exportToSTL(mergedGeometry);
-        
-        downloadFile(stlData, `${state.currentModelName || 'lego-parts'}.stl`);
         hideLoading();
         hideExportModal();
         
     } catch (error) {
         hideLoading();
+        console.error('Export error:', error);
         alert('Export failed: ' + error.message);
     }
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 function exportToSTL(geometry) {

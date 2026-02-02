@@ -1,0 +1,33 @@
+{
+  "name": "Lego Piece Printer",
+  "short_name": "LegoPrinter",
+  "description": "Load Lego sets, select pieces you need, export to STL for 3D printing",
+  "start_url": "/lego-printer/",
+  "display": "standalone",
+  "background_color": "#0f0f1a",
+  "theme_color": "#f7d731",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/lego-printer/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/lego-printer/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["utilities", "productivity"],
+  "screenshots": [
+    {
+      "src": "/lego-printer/screenshots/desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ]
+}

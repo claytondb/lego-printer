@@ -4,6 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lego Piece Printer - 3D Print Your Lego Sets</title>
+    
+    <!-- PWA -->
+    <link rel="manifest" href="/lego-printer/manifest.json">
+    <meta name="theme-color" content="#f7d731">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LegoPrinter">
+    <link rel="apple-touch-icon" href="/lego-printer/icons/icon.svg">
+    
     <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
@@ -11,6 +20,9 @@
         <header>
             <h1>🧱 Lego Piece Printer</h1>
             <p>Load a Lego design, select pieces you need, export to STL for 3D printing</p>
+            <button id="installBtn" class="install-btn" style="display: none;">
+                📲 Install App
+            </button>
         </header>
 
         <section class="upload-section">
@@ -66,6 +78,16 @@
                             <span><strong id="selectedCount">0</strong>/<span id="totalCount">0</span> types</span>
                             <span class="stat-divider">•</span>
                             <span><strong id="selectedPieces">0</strong>/<span id="totalPieces">0</span> pieces</span>
+                        </div>
+                        <div class="price-comparison">
+                            <span class="price-item" title="Estimated BrickLink cost">
+                                🛒 <strong id="buyPrice">$0</strong>
+                            </span>
+                            <span class="vs">vs</span>
+                            <span class="price-item print-price" title="Estimated 3D print cost">
+                                🖨️ <strong id="printPrice">$0</strong>
+                            </span>
+                            <span class="savings" id="savingsText"></span>
                         </div>
                     </div>
                     
@@ -157,10 +179,14 @@
                     <span class="option-hint">1 = actual Lego size</span>
                 </div>
 
-                <div class="option-group">
-                    <label>
-                        <input type="checkbox" id="combineParts" checked>
-                        Combine into single file
+                <div class="option-group export-type-toggle">
+                    <label class="toggle-option">
+                        <input type="radio" name="exportType" value="combined" checked>
+                        <span>📦 Single STL</span>
+                    </label>
+                    <label class="toggle-option">
+                        <input type="radio" name="exportType" value="individual">
+                        <span>📁 ZIP (one per part)</span>
                     </label>
                 </div>
 
@@ -188,5 +214,16 @@
     </div>
 
     <script type="module" src="/src/main.js"></script>
+    
+    <!-- PWA Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/lego-printer/sw.js')
+                    .then(reg => console.log('SW registered'))
+                    .catch(err => console.log('SW registration failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>
