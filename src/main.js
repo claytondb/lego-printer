@@ -1185,58 +1185,100 @@ async function updatePreview() {
         }
         
         const totalInstances = instances.length;
-        const cols = Math.ceil(Math.sqrt(totalInstances));
-        const spacing = 60; // Tighter spacing for more parts
-        
         let loaded = 0;
         updateLoadingStatus(`Loading parts: 0/${totalInstances}`);
         
-        // Cache geometries to avoid reloading same part
+        // Cache geometries and their sizes
         const geometryCache = new Map();
+        const sizeCache = new Map();
+        const padding = 15; // Gap between parts
         
-        for (let i = 0; i < instances.length; i++) {
-            const { partIndex, part } = instances[i];
-            const row = Math.floor(i / cols);
-            const col = i % cols;
-            const x = col * spacing - (cols * spacing / 2);
-            const z = row * spacing - (Math.ceil(totalInstances / cols) * spacing / 2);
-            
-            const isSelected = state.selectedParts.has(partIndex);
-            const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
-            
-            // Load geometry (use cache if already loaded)
-            let geometry = geometryCache.get(part.id);
-            if (!geometry) {
+        // First pass: load all unique geometries and measure sizes
+        for (const part of state.parts) {
+            if (!geometryCache.has(part.id)) {
+                let geometry;
                 try {
                     geometry = await getPartGeometry(part.id);
-                    geometryCache.set(part.id, geometry);
                 } catch (e) {
                     console.warn('Failed to get geometry for', part.id, e);
                 }
+                
+                if (!geometry) {
+                    geometry = new THREE.BoxGeometry(40, 24, 40);
+                    geometry.translate(0, 12, 0);
+                }
+                
+                geometryCache.set(part.id, geometry);
+                
+                // Measure bounding box
+                geometry.computeBoundingBox();
+                const box = geometry.boundingBox;
+                const size = {
+                    width: box.max.x - box.min.x,
+                    height: box.max.y - box.min.y,
+                    depth: box.max.z - box.min.z
+                };
+                sizeCache.set(part.id, size);
+            }
+        }
+        
+        // Calculate layout - row by row with variable widths
+        const maxRowWidth = Math.sqrt(totalInstances) * 80; // Approximate target width
+        const rows = [];
+        let currentRow = [];
+        let currentRowWidth = 0;
+        
+        for (const instance of instances) {
+            const size = sizeCache.get(instance.part.id);
+            const itemWidth = Math.max(size.width, size.depth) + padding;
+            
+            if (currentRowWidth + itemWidth > maxRowWidth && currentRow.length > 0) {
+                rows.push({ items: currentRow, width: currentRowWidth });
+                currentRow = [];
+                currentRowWidth = 0;
             }
             
-            // Create mesh
-            if (!geometry) {
-                geometry = new THREE.BoxGeometry(40, 24, 40);
-                geometry.translate(0, 12, 0);
+            currentRow.push({ ...instance, size, itemWidth });
+            currentRowWidth += itemWidth;
+        }
+        if (currentRow.length > 0) {
+            rows.push({ items: currentRow, width: currentRowWidth });
+        }
+        
+        // Second pass: place meshes with proper spacing
+        let zOffset = 0;
+        for (const row of rows) {
+            // Find tallest item depth for row spacing
+            const maxDepth = Math.max(...row.items.map(item => item.size.depth)) + padding;
+            
+            let xOffset = -row.width / 2;
+            for (const item of row.items) {
+                const { partIndex, part, size, itemWidth } = item;
+                const geometry = geometryCache.get(part.id);
+                const isSelected = state.selectedParts.has(partIndex);
+                const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
+                
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: colorHex,
+                    opacity: isSelected ? 1 : 0.3,
+                    transparent: !isSelected,
+                    flatShading: false
+                });
+                
+                const mesh = new THREE.Mesh(geometry.clone(), material);
+                mesh.position.set(xOffset + itemWidth / 2, 0, zOffset);
+                mesh.userData = { partIndex };
+                state.partsGroup.add(mesh);
+                
+                xOffset += itemWidth;
+                loaded++;
+                
+                if (loaded % 20 === 0 || loaded === totalInstances) {
+                    updateLoadingStatus(`Placing parts: ${loaded}/${totalInstances}`);
+                }
             }
             
-            const material = new THREE.MeshPhongMaterial({ 
-                color: colorHex,
-                opacity: isSelected ? 1 : 0.3,
-                transparent: !isSelected,
-                flatShading: false
-            });
-            
-            const mesh = new THREE.Mesh(geometry.clone(), material);
-            mesh.position.set(x, 0, z);
-            mesh.userData = { partIndex };
-            state.partsGroup.add(mesh);
-            
-            loaded++;
-            if (loaded % 10 === 0 || loaded === totalInstances) {
-                updateLoadingStatus(`Loading parts: ${loaded}/${totalInstances}`);
-            }
+            zOffset += maxDepth;
         }
         
         updateLoadingStatus('');
