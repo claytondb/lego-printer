@@ -272,6 +272,11 @@ header p {
     font-weight: 600;
 }
 
+.preview-controls {
+    display: flex;
+    gap: 6px;
+}
+
 .icon-btn {
     width: 36px;
     height: 36px;

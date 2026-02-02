@@ -341,11 +341,18 @@ async function loadRebrickableSet(setNum) {
         // Select all by default
         state.selectedParts = new Set(state.parts.map((_, i) => i));
         
+        // Switch to Parts view since we don't have assembly data
+        state.viewMode = 'parts';
+        
         hideLoading();
         showWorkspace(setDetails.name);
         populateColorFilter();
         renderPartsList();
         init3DPreview();
+        
+        // Update view toggle buttons
+        document.getElementById('viewBuilt').classList.remove('active');
+        document.getElementById('viewParts').classList.add('active');
         
     } catch (error) {
         hideLoading();
@@ -792,6 +799,7 @@ function setupWorkspace() {
     document.getElementById('viewBuilt').addEventListener('click', () => setViewMode('built'));
     document.getElementById('viewParts').addEventListener('click', () => setViewMode('parts'));
     
+    document.getElementById('centerView').addEventListener('click', centerView);
     document.getElementById('resetView').addEventListener('click', resetCameraView);
 }
 
@@ -1094,8 +1102,22 @@ async function updatePreview() {
         
         state.scene.add(state.partsGroup);
         
-        // Center view on parts grid
-        state.controls.target.set(0, 0, 0);
+        // Auto-center on parts
+        if (state.partsGroup.children.length > 0) {
+            const box = new THREE.Box3().setFromObject(state.partsGroup);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const distance = maxDim * 1.2;
+            
+            state.controls.target.copy(center);
+            state.camera.position.set(
+                center.x + distance,
+                center.y + distance * 0.5,
+                center.z + distance
+            );
+            state.controls.update();
+        }
         
         // Show cache stats
         const stats = getCacheStats();
@@ -1106,6 +1128,33 @@ async function updatePreview() {
 function resetCameraView() {
     state.camera.position.set(200, 200, 200);
     state.controls.target.set(0, 0, 0);
+    state.controls.update();
+}
+
+function centerView() {
+    if (!state.scene) return;
+    
+    // Find the group to center on
+    const targetGroup = state.viewMode === 'built' && state.builtGroup 
+        ? state.builtGroup 
+        : state.partsGroup;
+    
+    if (!targetGroup) return;
+    
+    // Calculate bounding box
+    const box = new THREE.Box3().setFromObject(targetGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    
+    // Position camera to see entire model
+    const distance = maxDim * 1.5;
+    state.camera.position.set(
+        center.x + distance,
+        center.y + distance * 0.5,
+        center.z + distance
+    );
+    state.controls.target.copy(center);
     state.controls.update();
 }
 
