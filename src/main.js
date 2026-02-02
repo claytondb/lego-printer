@@ -1172,41 +1172,8 @@ async function updatePreview() {
             const isSelected = state.selectedParts.has(i);
             const colorHex = part.colorHex || LDRAW_COLORS[part.color]?.hex || '#888888';
             
-            // Try to load part image, fall back to 3D geometry
-            if (part.image) {
-                try {
-                    // Create sprite with part image
-                    const sprite = await loadPartSprite(part.image, textureLoader);
-                    sprite.position.set(x, 30, z);
-                    sprite.scale.set(50, 50, 1);
-                    sprite.userData = { partIndex: i };
-                    
-                    if (!isSelected) {
-                        sprite.material.opacity = 0.4;
-                        sprite.material.transparent = true;
-                    }
-                    
-                    state.partsGroup.add(sprite);
-                    
-                    // Add colored base plate
-                    const baseGeo = new THREE.BoxGeometry(50, 4, 50);
-                    const baseMat = new THREE.MeshPhongMaterial({ 
-                        color: colorHex,
-                        opacity: isSelected ? 1 : 0.4,
-                        transparent: !isSelected
-                    });
-                    const base = new THREE.Mesh(baseGeo, baseMat);
-                    base.position.set(x, 2, z);
-                    state.partsGroup.add(base);
-                    
-                } catch (e) {
-                    // Fall back to 3D geometry
-                    addGeometryPart(i, part, x, z, colorHex, isSelected);
-                }
-            } else {
-                // No image, use 3D geometry
-                addGeometryPart(i, part, x, z, colorHex, isSelected);
-            }
+            // Always use 3D geometry - sprites are unreliable due to CORS
+            await addGeometryPart(i, part, x, z, colorHex, isSelected);
             
             loaded++;
             if (loaded % 5 === 0 || loaded === total) {
@@ -1244,22 +1211,30 @@ async function loadPartSprite(imageUrl, loader) {
 }
 
 async function addGeometryPart(index, part, x, z, colorHex, isSelected) {
+    let geometry;
     try {
-        const geometry = await getPartGeometry(part.id);
-        const material = new THREE.MeshPhongMaterial({ 
-            color: colorHex,
-            opacity: isSelected ? 1 : 0.5,
-            transparent: !isSelected,
-            flatShading: false
-        });
-        
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(x, 0, z);
-        mesh.userData = { partIndex: index };
-        state.partsGroup.add(mesh);
+        geometry = await getPartGeometry(part.id);
     } catch (e) {
-        console.warn('Failed to add part', part.id, e);
+        console.warn('Failed to get geometry for', part.id, e);
     }
+    
+    // Always show something - use fallback box if geometry failed
+    if (!geometry) {
+        geometry = new THREE.BoxGeometry(40, 24, 40);
+        geometry.translate(0, 12, 0);
+    }
+    
+    const material = new THREE.MeshPhongMaterial({ 
+        color: colorHex,
+        opacity: isSelected ? 1 : 0.5,
+        transparent: !isSelected,
+        flatShading: false
+    });
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, 0, z);
+    mesh.userData = { partIndex: index };
+    state.partsGroup.add(mesh);
 }
 
 function centerOnGroup(group) {
