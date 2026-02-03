@@ -1539,10 +1539,17 @@ async function performExport() {
         );
         
         if (exportType === 'individual') {
-            // Export as ZIP with individual files
+            // Export as ZIP with individual files, grouped by color
             showLoading('Creating ZIP file...');
             const zip = new JSZip();
-            const folder = zip.folder(state.currentModelName || 'lego-parts');
+            const rootFolder = zip.folder(state.currentModelName || 'lego-parts');
+            
+            // LDU to mm conversion: 1 LDU = 0.4mm
+            const LDU_TO_MM = 0.4;
+            const totalScale = LDU_TO_MM * scale;
+            
+            // Group parts by color
+            const colorFolders = new Map();
             
             for (let i = 0; i < selectedParts.length; i++) {
                 const part = selectedParts[i];
@@ -1552,11 +1559,18 @@ async function performExport() {
                     continue;
                 }
                 const scaledGeo = geo.clone();
-                scaledGeo.scale(scale, scale, scale);
+                scaledGeo.scale(totalScale, totalScale, totalScale);
+                
+                // Get or create color folder
+                const colorFolderName = part.colorName.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-') || 'Unknown';
+                if (!colorFolders.has(colorFolderName)) {
+                    colorFolders.set(colorFolderName, rootFolder.folder(colorFolderName));
+                }
+                const colorFolder = colorFolders.get(colorFolderName);
                 
                 const stlData = exportToSTL(scaledGeo);
-                const filename = `${part.id}_${part.colorName.replace(/\s+/g, '-')}_x${part.quantity}.stl`;
-                folder.file(filename, stlData);
+                const filename = `${part.id}_x${part.quantity}.stl`;
+                colorFolder.file(filename, stlData);
                 
                 showLoading(`Adding ${i + 1}/${selectedParts.length}...`);
             }
@@ -1568,7 +1582,7 @@ async function performExport() {
                 color: p.colorName,
                 quantity: p.quantity
             }));
-            folder.file('manifest.json', JSON.stringify(manifest, null, 2));
+            rootFolder.file('manifest.json', JSON.stringify(manifest, null, 2));
             
             showLoading('Compressing ZIP...');
             const content = await zip.generateAsync({ type: 'blob' });
@@ -1578,8 +1592,12 @@ async function performExport() {
             // Export as single combined STL
             showLoading('Building STL...');
             
+            // LDU to mm conversion: 1 LDU = 0.4mm
+            const LDU_TO_MM = 0.4;
+            const totalScale = LDU_TO_MM * scale;
+            
             const geometries = [];
-            const spacing = 50;
+            const spacing = 50 * LDU_TO_MM; // Convert spacing to mm too
             const cols = Math.ceil(Math.sqrt(selectedIndices.length));
             
             loadedGeometries.forEach((geo, index) => {
@@ -1591,13 +1609,14 @@ async function performExport() {
                 const row = Math.floor(index / cols);
                 const col = index % cols;
                 
+                // Scale first, then translate (so spacing is in mm)
+                clonedGeo.scale(totalScale, totalScale, totalScale);
                 clonedGeo.translate(
                     col * spacing * scale,
                     0,
                     row * spacing * scale
                 );
                 
-                clonedGeo.scale(scale, scale, scale);
                 geometries.push(clonedGeo);
             });
             
